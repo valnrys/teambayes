@@ -20,8 +20,9 @@ import kotlin.math.sqrt
  *
  * This is a line-by-line port of openskill 6.2.0's `ThurstoneMostellerFull`, reduced
  * to two teams and to the options TeamBayes uses (no weights, no scores, no
- * `limit_sigma`, no `balance`, and no per-call tau override). It reproduces
- * openskill's results to about 1e-9, quirks included; the comments in [rate] point
+ * `limit_sigma`, no `balance`, and no per-call tau override). It matches
+ * openskill's reference values within the tests' 1e-9 tolerance (observed agreement is
+ * around 2e-13), quirks included; the comments in [rate] point
  * each one out. Most callers want [WengLin] rather than this constructor.
  *
  * @property mu starting skill for a new player, finite; see [EngineConfig.MU0].
@@ -130,7 +131,10 @@ class ThurstoneMostellerFull(
     fun predictDraw(teamA: List<Rating>, teamB: List<Rating>): Double {
         requireTeams(teamA, teamB)
         val totalPlayers = teamA.size + teamB.size
+        // openskill quirk, copied: the draw rate is assumed to be 1 / n, not learned.
         val drawProbability = 1.0 / totalPlayers
+        // n enters twice: openskill multiplies beta by sqrt(n), assuming an unscaled beta,
+        // but WengLin's beta is already scaled by sqrt(n / 2), so n scales it a second time.
         val drawMargin = sqrt(totalPlayers.toDouble()) * beta *
             NormalDist.invCdf((1 + drawProbability) / 2)
 
@@ -156,6 +160,7 @@ class ThurstoneMostellerFull(
         val c = sqrt(self.sigmaSquared + other.sigmaSquared + (2 * betaSquared))
         val deltaMu = (self.mu - other.mu) / c
         val sigmaSquaredToC = self.sigmaSquared / c
+        // openskill's default gamma: sqrt(team variance) / c.
         val gamma = sqrt(self.sigmaSquared) / c
         // epsilon is the draw margin, and openskill passes it to wins and losses too.
         val t = epsilon / c

@@ -54,6 +54,10 @@ meant. Each of these is marked in `ThurstoneMostellerFull.kt`.
   average mu change, but it reads the "before" values from objects it has already
   updated, so the step changes nothing. We copy that.
 - **Draw prediction assumes a draw rate of `1 / n`** and ignores epsilon.
+- **The player count enters `predictDraw` twice.** This isn't purely openskill's doing.
+  openskill's `predict_draw` multiplies beta by `sqrt(n)`, assuming an unscaled beta. Our
+  `WengLin` already scales beta by `sqrt(n / 2)`, so through `WengLin` the player count
+  scales beta a second time. It doesn't change which split ranks best.
 - **Defaults:** no sigma limiting, no outlier balancing, no player weights, no score
   margin.
 
@@ -113,3 +117,7 @@ inverse CDF. The difference is a few ulp, far inside the 1e-9 tolerance.
 - **Close games are the goal, so judge it on closeness.** When the balancer does its
   job, results are close to a coin flip, and the model will rarely "predict the
   winner". That's success, not failure. The right measure is whether games are close.
+- **Tau is added once per game played, not per week away.** A player returning after
+  months keeps their old certainty until they play.
+- **Replay's last tie-break compares game ids as text.** Callers should use ids that
+  sort sensibly (the app will use timestamps first anyway).

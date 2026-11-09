@@ -66,11 +66,11 @@ sealed interface BalanceResult {
  *
  * **Exhaustive or sampled.** First the balancer counts the splits the locks allow.
  * Up to [EXHAUSTIVE_LIMIT] splits, every one is tried. That always covers rosters of up
- * to [EXHAUSTIVE_MAX] players (20 players is 92,378 splits, which takes well under a
- * second), and bigger rosters whose locks leave few choices. Above the limit (22 players
- * with no locks is about 350,000 splits) a random sample of distinct splits is tried
- * instead and the result is marked `sampled`. The sample is uniform: every allowed split
- * is equally likely to be drawn.
+ * to [EXHAUSTIVE_MAX] players (20 players is 92,378 splits, which takes a few tens of
+ * milliseconds on a laptop), and bigger rosters whose locks leave few choices. Above
+ * the limit (22 players with no locks is about 350,000 splits) a random sample of
+ * distinct splits is tried instead and the result is marked `sampled`. The sample is
+ * uniform: every allowed split is equally likely to be drawn.
  *
  * **Deterministic.** The same players, locks, `k` and seed always give the same splits
  * in the same order, with the same team labels. The order the players are passed in
@@ -78,7 +78,11 @@ sealed interface BalanceResult {
  */
 object Balancer {
 
-    /** The most players for which every split is always tried, whatever the locks. */
+    /**
+     * A guarantee, not a setting: rosters of this size or fewer are always tried
+     * exhaustively, because they have at most 92,378 splits, under [EXHAUSTIVE_LIMIT].
+     * The code doesn't read it; [EXHAUSTIVE_LIMIT] is the real switch.
+     */
     const val EXHAUSTIVE_MAX: Int = 20
 
     /** The most splits that are all tried; above this the balancer samples. */

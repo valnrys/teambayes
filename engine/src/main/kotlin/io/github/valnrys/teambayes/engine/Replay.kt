@@ -50,8 +50,7 @@ data class ReplayResult(
  * @param games the games to apply, in any order.
  * @throws IllegalArgumentException if a game names a player not in [starting], has an
  *   empty team, lists a player twice (on both teams or twice in one), or if two games
- *   share an id. Nothing is rated until every game has passed these checks. Also thrown
- *   (by the model) if a team's players all have sigma 0.
+ *   share an id. Nothing is rated until every game has passed these checks.
  */
 fun replay(starting: Map<String, Rating>, games: List<Game>): ReplayResult {
     validate(starting, games)

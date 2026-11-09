@@ -255,7 +255,8 @@ class BalancerTest {
 
     @Test
     fun `many locks on a big roster leave few splits, which are all tried`() {
-        // 21 players, 10 locked to A: A needs one more of 11 free, so 11 + ... = 12 splits.
+        // 21 players, 10 locked to A. A is either the smaller team (all 10 locked: 1 split)
+        // or the bigger one (needs 1 more of the 11 free: 11 splits), so 1 + 11 = 12.
         val players = roster(21, Random(1), sameSigma = false)
         val locks = players.take(10).associate { it.id to Side.A }
         val result = splitsOf(Balancer.balance(players, locks, k = 1000))

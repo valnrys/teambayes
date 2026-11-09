@@ -66,7 +66,7 @@ internal object NormalDist {
      * Probability density function: the height of the bell curve at [x].
      *
      * Depends only on `x * x`, so `pdf(x) == pdf(-x)` holds exactly. openskill relies
-     * on that symmetry: one of its helpers subtracts `pdf(t) - pdf(-t)` and must get 0.0.
+     * on that symmetry: one of its helpers computes `pdf(-t) - pdf(t)` and must get 0.0.
      */
     fun pdf(x: Double): Double = StrictMath.exp(x * x / -2.0) / SQRT_TWO_PI
 
@@ -206,7 +206,7 @@ internal object NormalDist {
                 bigS = ONE + s * (SA1 + s * (SA2 + s * (SA3 + s * (SA4 + s * (
                     SA5 + s * (SA6 + s * (SA7 + s * SA8)))))))
             } else { // |x| >= 1/0.35
-                if (hx < 0 && ix >= 0x40180000) return TWO - TINY // x < -6
+                if (hx < 0 && ix >= 0x40180000) return TWO - TINY // x <= -6
                 bigR = RB0 + s * (RB1 + s * (RB2 + s * (RB3 + s * (RB4 + s * (
                     RB5 + s * RB6)))))
                 bigS = ONE + s * (SB1 + s * (SB2 + s * (SB3 + s * (SB4 + s * (

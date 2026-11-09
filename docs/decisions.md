@@ -16,10 +16,10 @@ There is no personal domain, and a GitHub-based ID is free and suits an open-sou
 project. It matters because an Android app's ID can't change after its first upload
 to Google Play.
 
-## Every change is reviewed adversarially by two independent reviewers before it's pushed
+## Every change is reviewed adversarially by two independent AI reviewers before it's pushed
 *2026-11-08*
 
-Each reviewer is asked to find what's wrong, not to approve. Two different reviewers
+Each AI reviewer is asked to find what's wrong, not to approve. Two different reviewers
 catch different things, and nothing reaches the public repo until both come back clean.
 
 ## Weng-Lin Thurstone-Mosteller, via openskill
@@ -121,5 +121,6 @@ the chance of a draw, the more even the game.
 *2026-11-09*
 
 The app stores players and games, not ratings. Current ratings come from replaying
-every game in date order. Editing or deleting an old game then just means replaying
-again, with no way for a stored rating to drift out of step with the history.
+every game by when it was played, then when it was entered, then by id. Editing or
+deleting an old game then just means replaying again, with no way for a stored rating to
+drift out of step with the history.
