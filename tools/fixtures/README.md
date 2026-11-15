@@ -14,7 +14,7 @@ Two hard requirements, both checked by `generate.py` (it refuses to run otherwis
 - **Python 3.14 or newer.** On 3.14, `NormalDist.cdf(x)` is `0.5 * erfc(-x / sqrt(2))`.
   Python 3.13 and older compute `0.5 * (1 + erf(x / sqrt(2)))`, which gives different
   values and loses the lower tail. **That 3.14 form is the one the Kotlin
-  `phi_major` must copy.**
+  equivalent of `phi_major`, `NormalDist.cdf`, must copy.**
 - **Pure-Python openskill.** PyPI's cp310-cp313 wheels are compiled with mypyc,
   which bypasses the generator's branch counters and ulp checks. Install from the
   sdist with `--no-binary`.

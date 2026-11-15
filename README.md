@@ -1,8 +1,8 @@
 # TeamBayes
 
-An offline Android app that picks balanced 5-a-side teams and learns from results. Work in progress.
+An offline Android app that picks balanced 5-a-side teams and learns from results.
 
-**Status:** this commit holds the project skeleton and the reference fixtures (see [tools/fixtures/README.md](tools/fixtures/README.md)). The Kotlin engine is in progress.
+**Status:** the rating engine (Kotlin, checked against openskill reference fixtures) is done; the Android app is next. See [docs/model.md](docs/model.md) for how it works and [docs/walkthrough/01-engine.md](docs/walkthrough/01-engine.md) for a tour of the code.
 
 ## Licence
 
