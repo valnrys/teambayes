@@ -4,7 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import io.github.valnrys.teambayes.tonight.TonightRoute
+import io.github.valnrys.teambayes.matchday.MatchDayRoute
 import io.github.valnrys.teambayes.ui.theme.TeamBayesTheme
 
 /**
@@ -18,7 +18,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             TeamBayesTheme {
-                TonightRoute()
+                MatchDayRoute()
             }
         }
     }

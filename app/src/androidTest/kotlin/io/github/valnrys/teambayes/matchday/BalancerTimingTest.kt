@@ -1,4 +1,4 @@
-package io.github.valnrys.teambayes.tonight
+package io.github.valnrys.teambayes.matchday
 
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4

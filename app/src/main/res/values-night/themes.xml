@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.TeamBayes" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">#101512</item>
+        <item name="android:windowBackground">#0B0E13</item>
     </style>
 </resources>

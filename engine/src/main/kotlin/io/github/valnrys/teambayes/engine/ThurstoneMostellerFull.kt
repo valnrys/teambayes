@@ -130,6 +130,78 @@ class ThurstoneMostellerFull(
      */
     fun predictDraw(teamA: List<Rating>, teamB: List<Rating>): Double {
         requireTeams(teamA, teamB)
+        val terms = drawTerms(teamA, teamB)
+        return terms.drawChance(terms.muA, terms.muB)
+    }
+
+    /**
+     * How even a game between [teamA] and [teamB] is, from 0 to 1, where 1.0 means
+     * "as even as these players could possibly be".
+     *
+     * It is [predictDraw] divided by the best draw chance this game could have: the
+     * same players, the same team sizes and the same uncertainty (sigma), but with
+     * both teams' total skill (the sums of mu) exactly level. The draw chance is a bell
+     * curve centred on a skill gap of zero, so a level gap is its peak and every real
+     * split scores at or below it.
+     *
+     * Two things fall out of that:
+     *
+     * - **It's easy to read.** A raw draw chance of 0.21 means little on its own; it
+     *   depends on how many play and how unsure the ratings are. "93% of the best
+     *   possible" means the same thing for any roster.
+     * - **It ranks splits exactly as [predictDraw] does.** Every split of one roster has
+     *   the same total sigma and player count, so the denominator is the same for all
+     *   of them. The balancer can keep maximising the draw chance, and the screen can
+     *   show this number, without the two ever disagreeing about which split is best.
+     *
+     * Both halves of the division come from the same sums, margin and spread, through the
+     * same expression, so a split whose team totals are exactly equal gives exactly 1.0.
+     *
+     * **Why not the original web version's number.** The owner's earlier web version
+     * showed TrueSkill's "match quality" formula. TrueSkill is Microsoft's and patented,
+     * and TeamBayes is built only from openskill's openly licensed maths, so this measure
+     * is made from the model's own draw prediction instead. It plays the same role: 1.0
+     * is a perfect match, and lower is more lopsided.
+     *
+     * @return a value in `[0, 1]`: 1.0 when the two teams' total mu is equal, and 0.0
+     *   only if the draw chance is too small for a Double to hold.
+     * @throws IllegalArgumentException if a team is empty.
+     */
+    fun quality(teamA: List<Rating>, teamB: List<Rating>): Double {
+        requireTeams(teamA, teamB)
+        val terms = drawTerms(teamA, teamB)
+        val draw = terms.drawChance(terms.muA, terms.muB)
+        // The same game with team B's total moved to match team A's: the peak.
+        val levelDraw = terms.drawChance(terms.muA, terms.muA)
+        return (draw / levelDraw).coerceIn(0.0, 1.0)
+    }
+
+    /**
+     * Everything [predictDraw] needs about one game, worked out once.
+     *
+     * @property muA team A's summed mu.
+     * @property muB team B's summed mu.
+     * @param drawMargin how close the two performances must be to count as a draw.
+     * @param spread the standard deviation of the performance gap.
+     */
+    private class DrawTerms(
+        val muA: Double,
+        val muB: Double,
+        private val drawMargin: Double,
+        private val spread: Double,
+    ) {
+
+        /**
+         * The draw chance for team totals [totalA] and [totalB] with this margin and spread.
+         * Pass [muA] and [muB] for the real game. The expression is openskill's, term for
+         * term, so the bits match its output.
+         */
+        fun drawChance(totalA: Double, totalB: Double): Double =
+            NormalDist.cdf((drawMargin - totalA + totalB) / spread) -
+                NormalDist.cdf((totalB - totalA - drawMargin) / spread)
+    }
+
+    private fun drawTerms(teamA: List<Rating>, teamB: List<Rating>): DrawTerms {
         val totalPlayers = teamA.size + teamB.size
         // openskill quirk, copied: the draw rate is assumed to be 1 / n, not learned.
         val drawProbability = 1.0 / totalPlayers
@@ -141,8 +213,7 @@ class ThurstoneMostellerFull(
         val a = teamSum(teamA)
         val b = teamSum(teamB)
         val spread = sqrt(2 * (beta * beta) + a.sigmaSquared + b.sigmaSquared)
-        return NormalDist.cdf((drawMargin - a.mu + b.mu) / spread) -
-            NormalDist.cdf((b.mu - a.mu - drawMargin) / spread)
+        return DrawTerms(a.mu, b.mu, drawMargin, spread)
     }
 
     /**

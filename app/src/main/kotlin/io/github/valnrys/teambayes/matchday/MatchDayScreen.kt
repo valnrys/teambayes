@@ -1,0 +1,148 @@
+package io.github.valnrys.teambayes.matchday
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.valnrys.teambayes.R
+import io.github.valnrys.teambayes.engine.Side
+import io.github.valnrys.teambayes.ui.theme.teamBayesColors
+
+/**
+ * Everything a match-day screen can ask for. [MatchDayViewModel] does the real work;
+ * previews pass [NoActions].
+ *
+ * Passing one interface, rather than a dozen separate lambdas, keeps every step's
+ * signature short. Each function is documented on the ViewModel.
+ */
+interface MatchDayActions {
+    fun toggleSelected(playerId: String)
+    fun setSearch(text: String)
+    fun setNewPlayerName(text: String)
+    fun addPlayer()
+    fun generate()
+    fun makeTeamsManually()
+    fun selectSplit(index: Int)
+    fun regenerate()
+    fun confirmDiscard()
+    fun dismissDiscard()
+    fun movePlayer(playerId: String)
+    fun toggleLock(playerId: String, side: Side)
+    fun continueToConfirm()
+    fun confirm()
+    fun noticeShown()
+    fun back()
+}
+
+/** Does nothing: for previews, which only draw. */
+object NoActions : MatchDayActions {
+    override fun toggleSelected(playerId: String) = Unit
+    override fun setSearch(text: String) = Unit
+    override fun setNewPlayerName(text: String) = Unit
+    override fun addPlayer() = Unit
+    override fun generate() = Unit
+    override fun makeTeamsManually() = Unit
+    override fun selectSplit(index: Int) = Unit
+    override fun regenerate() = Unit
+    override fun confirmDiscard() = Unit
+    override fun dismissDiscard() = Unit
+    override fun movePlayer(playerId: String) = Unit
+    override fun toggleLock(playerId: String, side: Side) = Unit
+    override fun continueToConfirm() = Unit
+    override fun confirm() = Unit
+    override fun noticeShown() = Unit
+    override fun back() = Unit
+}
+
+/**
+ * Match day with its [MatchDayViewModel] wired up.
+ *
+ * This is the only function that knows about the ViewModel. Everything it draws is in
+ * [MatchDayScreen], which only takes plain values, so it's easy to preview and test.
+ */
+@Composable
+fun MatchDayRoute(viewModel: MatchDayViewModel = viewModel()) {
+    // collectAsStateWithLifecycle stops listening while the app is in the background.
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    MatchDayScreen(state = state, actions = viewModel)
+}
+
+/**
+ * Match day: roster → pick a split (or the manual board) → confirm.
+ *
+ * Stateless: it draws [state] and reports taps through [actions]. One step shows at a
+ * time, chosen by [MatchDayUiState.step]; the "Discard your edits?" dialog and the
+ * snackbar sit on top of whichever it is.
+ */
+@Composable
+fun MatchDayScreen(state: MatchDayUiState, actions: MatchDayActions, modifier: Modifier = Modifier) {
+    // The phone's back gesture goes one step back, like "← Back". On the roster it's off,
+    // so back leaves the app as usual.
+    BackHandler(enabled = state.step != Step.ROSTER, onBack = actions::back)
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    val notice = state.notice?.let { stringResource(it) }
+    // Runs whenever a new notice arrives: show it, then tell the ViewModel it's been shown.
+    LaunchedEffect(notice) {
+        if (notice != null) {
+            snackbarHostState.showSnackbar(notice)
+            actions.noticeShown()
+        }
+    }
+
+    // The app draws edge to edge. safeDrawing covers the status and navigation bars, the
+    // camera cutout and the keyboard, so content and text fields stay clear of all four.
+    Scaffold(
+        modifier = modifier,
+        contentWindowInsets = WindowInsets.safeDrawing,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+    ) { innerPadding: PaddingValues ->
+        when (state.step) {
+            Step.ROSTER -> RosterStep(state, actions, innerPadding)
+            Step.GENERATE -> PickSplitStep(state, actions, innerPadding)
+            Step.MANUAL -> ManualStep(state, actions, innerPadding)
+            Step.CONFIRM -> ConfirmStep(state, actions, innerPadding)
+        }
+    }
+
+    if (state.discardPrompt != null) {
+        DiscardDialog(onDiscard = actions::confirmDiscard, onCancel = actions::dismissDiscard)
+    }
+}
+
+/**
+ * "Discard your edits?" with Cancel and a red Discard, as in the original web version.
+ *
+ * A standard Material dialog, so TalkBack announces it and moves focus into it, and
+ * back or tapping outside counts as Cancel.
+ */
+@Composable
+private fun DiscardDialog(onDiscard: () -> Unit, onCancel: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        text = { Text(stringResource(R.string.discard_edits), style = MaterialTheme.typography.bodyLarge) },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
+        },
+        confirmButton = {
+            TextButton(onClick = onDiscard) {
+                Text(stringResource(R.string.discard), color = MaterialTheme.teamBayesColors.red)
+            }
+        },
+    )
+}

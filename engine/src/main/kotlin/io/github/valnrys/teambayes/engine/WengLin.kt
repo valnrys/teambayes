@@ -10,6 +10,7 @@ package io.github.valnrys.teambayes.engine
  * ```kotlin
  * val (newA, newB) = WengLin.rate(teamA, teamB, Outcome.DRAW)
  * val evenness = WengLin.predictDraw(teamA, teamB)
+ * val quality = WengLin.quality(teamA, teamB) // 1.0 = as even as possible
  * ```
  */
 object WengLin {
@@ -28,6 +29,13 @@ object WengLin {
     /** The chance of a draw: higher means a more even game. See [ThurstoneMostellerFull.predictDraw]. */
     fun predictDraw(teamA: List<Rating>, teamB: List<Rating>): Double =
         modelFor(teamA, teamB).predictDraw(teamA, teamB)
+
+    /**
+     * How even the game is, from 0 to 1: the draw chance as a share of the best this
+     * roster could manage. 1.0 is a perfectly level split. See [ThurstoneMostellerFull.quality].
+     */
+    fun quality(teamA: List<Rating>, teamB: List<Rating>): Double =
+        modelFor(teamA, teamB).quality(teamA, teamB)
 
     /**
      * The rating model for a game with [nPlayers] players in total, using
