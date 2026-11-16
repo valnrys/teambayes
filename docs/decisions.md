@@ -124,3 +124,64 @@ The app stores players and games, not ratings. Current ratings come from replayi
 every game by when it was played, then when it was entered, then by id. Editing or
 deleting an old game then just means replaying again, with no way for a stored rating to
 drift out of step with the history.
+
+## Android Gradle Plugin 9.5.1 with built-in Kotlin
+*2026-11-16*
+
+The app uses AGP 9.5.1, the latest stable release, on the pinned Gradle 9.8.2 (AGP needs
+9.6.0 or newer). Since AGP 9.0, Kotlin support is built in, so the app does not apply the
+`org.jetbrains.kotlin.android` plugin. Only the Compose compiler plugin is added, at the
+same version as Kotlin.
+
+## minSdk 26, compile and target SDK 37
+*2026-11-16*
+
+minSdk 26 (Android 8.0) lets launcher icons use a single adaptive-icon file and covers
+almost every phone in use. Compile and target SDK are 37, the newest AGP 9.5.1 supports.
+
+## The build fails on any unlisted permission
+*2026-11-16*
+
+TeamBayes is offline, so the app must never request INTERNET. A Gradle task,
+`verifyAllowedPermissions`, sits inside the merged-manifest pipeline, so every build
+that uses an app variant's manifest (APK, bundle, install) runs it first, not just `check`.
+The androidTest APK has its own manifest, which is not checked. It
+is an allowlist: it fails on any permission, from `<uses-permission>` or
+`<uses-permission-sdk-23>`, except AndroidX's own `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`.
+We do not strip permissions with `tools:node="remove"`, because that would silently hide a
+library's request; a person should see it and decide.
+
+## Backup is disabled
+*2026-11-16*
+
+`allowBackup` is false and the data-extraction rules exclude everything. No player data
+should leave the phone through Google's cloud backup. The app will have its own JSON
+export, which the user controls.
+
+## The emoji2 font downloader is removed
+*2026-11-16*
+
+Compose pulls in `androidx.emoji2`, whose start-up initializer can ask a font provider
+to download an emoji font. That is network activity by proxy, so its `meta-data` entry is
+removed from the manifest. The app uses the system's emoji.
+
+## No dynamic colour
+*2026-11-16*
+
+The app has a fixed pitch-green Material 3 palette, light and dark by system setting.
+Wallpaper-derived colours would make the app look different on every phone and make
+screenshots inconsistent.
+
+## Release shrinking is deferred
+*2026-11-16*
+
+R8 and resource shrinking will come with the release-signing work, so they can be
+tested together on a signed build.
+
+## On-phone balancing time
+*2026-11-16*
+
+Measured on a Pixel 9 Pro: balancing 18 players takes a median of about 66 ms, and 20 players
+(the exhaustive limit) a median of about 270 ms. The work runs off the main thread, so the
+screen stays responsive.
+
