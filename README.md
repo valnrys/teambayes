@@ -2,7 +2,7 @@
 
 An offline Android app that picks balanced 5-a-side teams and learns from results.
 
-**Status:** the rating engine (Kotlin, checked against openskill reference fixtures) is done, and the Android app has its first screen, "Tonight" (tick who is playing, balance into two teams). The app has no storage yet. See [docs/model.md](docs/model.md) for how it works and [docs/walkthrough/01-engine.md](docs/walkthrough/01-engine.md) for a tour of the code.
+**Status:** the rating engine (Kotlin, checked against openskill reference fixtures) is done, and the Android app runs match day: tick who's playing, pick one of three proposed Bibs / Non-bibs splits or make teams by hand, adjust, and confirm. The app has no storage yet, so confirming doesn't save. See [docs/model.md](docs/model.md) for how it works, and the walkthroughs of the [engine](docs/walkthrough/01-engine.md) and of [match day](docs/walkthrough/02-match-day.md) for a tour of the code.
 
 ## Licence
 

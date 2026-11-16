@@ -134,11 +134,11 @@ for (player in team.sortedByDescending { it.ordinal }) {
 ```
 See [ThurstoneMostellerFull.kt](../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt).
 
-## Milestone 2: the first screen on a phone
+## Milestone 2: match day on a phone
 
-This milestone adds the Android app: one screen that ticks who's playing and balances
-them with the engine from milestone 1. The full tour is in
-[walkthrough/02-first-screen.md](walkthrough/02-first-screen.md).
+This milestone adds the Android app: match day, from ticking who's playing to confirming
+two teams, using the engine from milestone 1. The full tour is in
+[walkthrough/02-match-day.md](walkthrough/02-match-day.md).
 
 ### An app module and its build file
 `:app` is a second module, built by the Android Gradle Plugin instead of plain Kotlin.
@@ -175,7 +175,7 @@ icon opens. `setContent` hands that window to Compose, the code-based UI toolkit
 ```kotlin
 setContent {
     TeamBayesTheme {
-        TonightRoute()
+        MatchDayRoute()
     }
 }
 ```
@@ -187,26 +187,26 @@ doesn't return anything; it emits UI.
 
 ```kotlin
 @Composable
-private fun PlayerRow(name: String, ticked: Boolean, onToggle: () -> Unit) {
+private fun PlayerRow(name: String, checked: Boolean, onToggle: () -> Unit) {
 ```
 When the state it read changes, Compose calls it again (a **recomposition**) and
-updates only what changed. You never "set" a checkbox; you redraw with `ticked = true`.
-See [TonightScreen.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/tonight/TonightScreen.kt).
+updates only what changed. You never "set" a checkbox; you redraw with `checked = true`.
+See [RosterStep.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt).
 
 ### State hoisting
 "Hoisting" state means moving it up and out of a composable, so the composable just
-takes values and reports events. `TonightRoute` holds the link to the ViewModel and
-passes plain values down:
+takes values and reports events. `MatchDayRoute` holds the link to the ViewModel and
+passes plain values down, with the ViewModel seen only as an interface of actions:
 
 ```kotlin
-TonightScreen(
-    state = state,
-    onToggle = viewModel::toggle,
-    onBalance = viewModel::balance,
-    onReroll = viewModel::reroll,
-)
+fun MatchDayRoute(viewModel: MatchDayViewModel = viewModel()) {
+    // collectAsStateWithLifecycle stops listening while the app is in the background.
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    MatchDayScreen(state = state, actions = viewModel)
 ```
-So `TonightScreen` can be previewed and tested with made-up data. Same file as above.
+(Simplified: the closing brace is left out.) So `MatchDayScreen` can be previewed with
+made-up data. See
+[MatchDayScreen.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt).
 
 ### `ViewModel` and `StateFlow`
 A `ViewModel` holds a screen's state and survives rotation, when the Activity itself is
@@ -214,12 +214,28 @@ rebuilt. A `StateFlow` is a value you can watch: it always has a current value a
 watchers when it changes.
 
 ```kotlin
-private val _state = MutableStateFlow(TonightUiState(players, initiallyTicked))
-val state: StateFlow<TonightUiState> = _state.asStateFlow()
+private val _state = MutableStateFlow(MatchDayUiState(players.sortedBy { it.name.lowercase() }))
+val state: StateFlow<MatchDayUiState> = _state.asStateFlow()
 ```
 (Simplified: the doc comment between the lines is left out.) Private and writable
 inside, read-only outside. See
-[TonightViewModel.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/tonight/TonightViewModel.kt).
+[MatchDayViewModel.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt).
+
+### A step machine in one `StateFlow`
+Match day has four screens, but there's no navigation library: the state has a `step`
+field, an `enum class Step { ROSTER, GENERATE, MANUAL, CONFIRM }`, and the screen draws
+whichever step it says:
+
+```kotlin
+when (state.step) {
+    Step.ROSTER -> RosterStep(state, actions, innerPadding)
+    Step.GENERATE -> PickSplitStep(state, actions, innerPadding)
+    Step.MANUAL -> ManualStep(state, actions, innerPadding)
+    Step.CONFIRM -> ConfirmStep(state, actions, innerPadding)
+}
+```
+Moving between screens is just a new state, so it's tested like any other change. See
+[MatchDayScreen.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt).
 
 ### `viewModelScope` and `Dispatchers.Default`
 A coroutine is a lightweight task that can pause without blocking a thread.
@@ -228,23 +244,54 @@ A coroutine is a lightweight task that can pause without blocking a thread.
 the pool for CPU-heavy work, so the main thread stays free to draw.
 
 ```kotlin
-balanceJob = viewModelScope.launch {
-    val outcome = withContext(balanceDispatcher) { Balancer.balance(roster, k = KEPT_SPLITS) }
+generateJob = viewModelScope.launch {
+    val result = withContext(generateDispatcher) { Balancer.balance(roster, locks, k = OPTIONS) }
 ```
-(Simplified: the rest of the block is left out. `balanceDispatcher` defaults to
-`Dispatchers.Default`.) Same file as above.
+(Simplified: the rest of the block is left out. `generateDispatcher` defaults to
+`Dispatchers.Default`.) See
+[MatchDayViewModel.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt).
 
 ### Material 3 theming
-Material 3 is Google's design system. `MaterialTheme` hands a colour scheme and text
-styles to everything inside it, so components pick them up without being told:
+Material 3 is Google's design system. `MaterialTheme` hands colours, text styles and
+corner shapes to everything inside it, so components pick them up without being told:
 
 ```kotlin
 MaterialTheme(
     colorScheme = if (darkTheme) DarkColors else LightColors,
+    typography = TeamBayesMaterialTypography,
+    shapes = TeamBayesMaterialShapes,
     content = content,
 )
 ```
 See [Theme.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/ui/theme/Theme.kt).
+
+### Bundled fonts and `FontFamily`
+Font files placed in `res/font` ship inside the app, so nothing is downloaded. A
+`FontFamily` groups the files of one typeface, and Compose picks the file that matches
+the weight and style a text style asks for:
+
+```kotlin
+val InstrumentSerif = FontFamily(
+    Font(R.font.instrument_serif_regular, FontWeight.Normal, FontStyle.Normal),
+    Font(R.font.instrument_serif_italic, FontWeight.Normal, FontStyle.Italic),
+)
+```
+`R.font.instrument_serif_regular` is the id Android generates for the file. See
+[Type.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/ui/theme/Type.kt).
+
+### A `CompositionLocal` for extra colours
+A `CompositionLocal` is a value that every composable inside a provider can read,
+without passing it through every function. TeamBayes uses one for the colours Material
+has no slot for, such as amber:
+
+```kotlin
+private val LocalTeamBayesColors = staticCompositionLocalOf { DarkTeamBayesColors }
+
+val MaterialTheme.teamBayesColors: TeamBayesColors
+    @Composable @ReadOnlyComposable get() = LocalTeamBayesColors.current
+```
+(Simplified: the doc comment is left out.) The theme provides the light or dark set, and
+screens write `MaterialTheme.teamBayesColors.amber`. Same file as Material 3 theming.
 
 ### Semantics for TalkBack
 TalkBack is Android's screen reader. It doesn't see pixels; it reads **semantics**, a
@@ -252,9 +299,25 @@ description of each element. Modifiers add to it: `toggleable` makes a row one c
 `heading()` marks a title, and a polite `liveRegion` is announced when it changes.
 
 ```kotlin
-.toggleable(value = ticked, role = Role.Checkbox, onValueChange = { onToggle() }),
+.toggleable(value = checked, role = Role.Checkbox, onValueChange = { onToggle() }),
 ```
-See [TonightScreen.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/tonight/TonightScreen.kt).
+See [RosterStep.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt).
+
+### `selectableGroup` and radio semantics
+To TalkBack, three cards where exactly one is chosen should sound like radio buttons.
+`selectable(role = Role.RadioButton)` makes each card one choice, and `selectableGroup()`
+on their parent says they belong together, so TalkBack can say "1 of 3":
+
+```kotlin
+.selectable(
+    selected = chosen,
+    enabled = enabled,
+    role = Role.RadioButton,
+    onClick = { actions.selectSplit(index) },
+),
+```
+(Simplified: the card around it is left out.) See
+[PickSplitStep.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt).
 
 ### JVM tests vs instrumented tests
 `app/src/test` holds **JVM tests**: they run on the laptop in seconds, with no phone,
