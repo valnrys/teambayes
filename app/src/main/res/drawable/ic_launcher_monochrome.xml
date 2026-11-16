@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Single-colour version of the icon, used for themed icons on Android 13+. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Right half filled, left half only an outline, so the two sides stay distinct. -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M54,28 A26,26 0 0 1 54,80 Z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#000000"
+        android:strokeWidth="3"
+        android:pathData="M52.5,29.5 A24.5,24.5 0 0 0 52.5,78.5 Z" />
+</vector>

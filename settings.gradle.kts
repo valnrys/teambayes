@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 rootProject.name = "teambayes"
 
 include(":engine")
+include(":app")

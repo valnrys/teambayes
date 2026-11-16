@@ -1,0 +1,153 @@
+import com.android.build.api.artifact.SingleArtifact
+import javax.xml.XMLConstants
+import javax.xml.parsers.DocumentBuilderFactory
+import org.w3c.dom.Element
+
+plugins {
+    alias(libs.plugins.android.application)
+    // Kotlin support is built into the Android Gradle Plugin since 9.0, so there is no
+    // `org.jetbrains.kotlin.android` plugin here. Compose still needs its compiler plugin.
+    alias(libs.plugins.kotlin.compose)
+}
+
+android {
+    namespace = "io.github.valnrys.teambayes"
+    compileSdk = 37
+
+    defaultConfig {
+        applicationId = "io.github.valnrys.teambayes"
+        minSdk = 26
+        targetSdk = 37
+        versionCode = 1
+        versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // Java 17 bytecode, matching :engine. Kotlin follows this setting automatically.
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        compose = true
+    }
+}
+
+dependencies {
+    implementation(project(":engine"))
+
+    // The BOM picks matching versions for every Compose library listed without one.
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.compose.material3)
+    debugImplementation(libs.androidx.compose.ui.tooling)
+
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.core.ktx)
+
+    // JVM unit tests (app/src/test).
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+
+    // Instrumented tests, which run on a phone (app/src/androidTest).
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.espresso.core)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
+}
+
+// ---------------------------------------------------------------------------------------
+// Privacy guard: TeamBayes is an offline app and must never be able to reach the network.
+// ---------------------------------------------------------------------------------------
+
+/**
+ * Fails the build if the final merged manifest asks for any permission that is not
+ * allowed, and passes the manifest through unchanged otherwise.
+ *
+ * This is an allowlist, not a blocklist: a new permission (INTERNET, or anything else) must
+ * be audited by a person and added here on purpose. We do not strip permissions with
+ * `tools:node="remove"` in the manifest, because that would hide a library's request.
+ *
+ * The task sits *inside* the manifest pipeline (it transforms MERGED_MANIFEST), so every
+ * build step that uses the merged manifest, such as `assembleRelease`, `bundleRelease`,
+ * and `installDebug`, runs it first. Checking only on `check` would not
+ * stop a release build.
+ */
+abstract class VerifyPermissions : DefaultTask() {
+
+    /** The merged manifest of one build variant, supplied by the Android Gradle Plugin. */
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val inputManifest: RegularFileProperty
+
+    /** Where the (unchanged) manifest is copied, for later build steps to use. */
+    @get:OutputFile
+    abstract val outputManifest: RegularFileProperty
+
+    /** The only permissions allowed. */
+    @get:Input
+    abstract val allowed: SetProperty<String>
+
+    @TaskAction
+    fun verify() {
+        val manifest = inputManifest.get().asFile
+        val requested = readPermissions(manifest)
+        logger.lifecycle("Permissions in merged manifest: " + requested.map { it.name }.sorted().ifEmpty { listOf("(none)") })
+
+        val unexpected = requested.filter { it.name !in allowed.get() }
+        if (unexpected.isNotEmpty()) {
+            val list = unexpected.joinToString("; ") { "${it.name} (in <${it.tag}>)" }
+            throw GradleException(
+                "Merged manifest requests permission(s) that are not on the allowlist: $list. " +
+                    "TeamBayes must stay offline. Audit it: the merger report " +
+                    "app/build/outputs/logs/manifest-merger-<variant>-report.txt names the " +
+                    "library that added it. If it is really needed, add it to the allowlist in app/build.gradle.kts."
+            )
+        }
+        manifest.copyTo(outputManifest.get().asFile, overwrite = true)
+    }
+
+    /** One permission request: its name and the manifest tag it came from. */
+    private data class Permission(val name: String, val tag: String)
+
+    /** Reads every `<uses-permission>` and `<uses-permission-sdk-23>` in [manifest]. */
+    private fun readPermissions(manifest: File): List<Permission> {
+        val factory = DocumentBuilderFactory.newInstance()
+        factory.isNamespaceAware = true
+        // A manifest is trusted, but be strict anyway: no DOCTYPE, so no external entities.
+        factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+        val document = factory.newDocumentBuilder().parse(manifest)
+        val androidNamespace = "http://schemas.android.com/apk/res/android"
+
+        // `uses-permission-sdk-23` is the same request, limited to Android 6.0 and later.
+        return listOf("uses-permission", "uses-permission-sdk-23").flatMap { tag ->
+            val nodes = document.getElementsByTagName(tag)
+            (0 until nodes.length)
+                .map { (nodes.item(it) as Element).getAttributeNS(androidNamespace, "name") }
+                // A request with no name is suspicious, so it fails the build too.
+                .map { Permission(it.ifBlank { "<missing android:name>" }, tag) }
+        }
+    }
+}
+
+// Insert the guard into each app variant's manifest pipeline (debug and release). The
+// androidTest APK has its own manifest, which this does not check.
+androidComponents.onVariants { variant ->
+    val variantName = variant.name.replaceFirstChar { it.uppercase() }
+    val verify = tasks.register<VerifyPermissions>("verifyAllowedPermissions$variantName") {
+        group = "verification"
+        description = "Fails if the ${variant.name} merged manifest has a permission not on the allowlist."
+        allowed.set(variant.applicationId.map { listOf("$it.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION") })
+    }
+    variant.artifacts
+        .use(verify)
+        .wiredWithFiles(VerifyPermissions::inputManifest, VerifyPermissions::outputManifest)
+        .toTransform(SingleArtifact.MERGED_MANIFEST)
+}
