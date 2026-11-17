@@ -45,7 +45,7 @@ Confirm doesn't save anything. The app never touches the network.
   Confirm ✓ → "Saving games arrives in the next milestone" → back to ROSTER
 ```
 
-Four ideas carry the whole thing:
+Five ideas carry the whole thing:
 
 - **One state value, one step at a time.** Everything on screen lives in one immutable
   `MatchDayUiState`, inside one `StateFlow`. Its `step` field says which screen shows.
@@ -55,6 +55,9 @@ Four ideas carry the whole thing:
   ViewModel calls in; the screen only draws.
 - **The model comments; it never decides.** Quality, win chances and the uneven-teams
   warning are shown, but none of them stops you confirming.
+- **The buttons stay put.** Every step has a scrolling body and a footer pinned to the
+  bottom of the screen, holding that step's main actions, so they never scroll out of
+  reach. The footer steps aside only while the keyboard is open.
 - **The maths never runs on the main thread.** The main thread draws the screen, so the
   balancer runs on a background thread, and taps that would clash with it are either
   ignored or cancel it (section 6).
@@ -62,21 +65,22 @@ Four ideas carry the whole thing:
 **How we know it's right.** On the laptop, 33 ViewModel tests drive whole match days,
 including the races between taps and a running balancer, and 13 tests pin down the
 editing rules. The engine gained 7 tests for `quality()`, including one that checks it
-ranks splits exactly as `predictDraw` does. On a phone, 4 UI tests tap through the real
+ranks splits exactly as `predictDraw` does. On a phone, 5 UI tests tap through the real
 screens the way a person would. A timing test measures the balancer: on a Pixel 9 Pro,
-18 players take a median of about 66 ms and 20 players about 270 ms. The permission
-guard (section 2) fails the build on any unlisted permission, and its **mutation
-checks** showed that adding INTERNET through `<uses-permission-sdk-23>`, or adding a
-harmless VIBRATE, each failed the build. As with the engine, **every change was reviewed
-adversarially by two independent AI reviewers before it was pushed** ([decisions.md](../decisions.md)).
+18 players take a median of about 65 ms, and 20 players between about 180 and 280 ms
+depending on the run. The permission guard (section 2) fails the build on any unlisted
+permission, and its **mutation checks** showed that adding INTERNET through
+`<uses-permission-sdk-23>`, or adding a harmless VIBRATE, each failed the build. As with
+the engine, **every change was reviewed adversarially by two independent AI reviewers
+before it was pushed** ([decisions.md](../decisions.md)).
 
 ---
 
 ## 2. The build and the guard
 
 **What it's for:** turning Kotlin and XML into an installable app, with the same library
-versions for everyone, and refusing to build an app that could go online. The only milestone 2
-addition to the build itself is the bundled fonts.
+versions for everyone, and refusing to build an app that could go online. Nothing here
+changed in the rebuild except the fonts.
 
 ### Modules, plugins and versions
 
@@ -230,6 +234,19 @@ corners and a 52 dp minimum height, chips are full pills. **`TeamBayesMaterialSh
 ([`Shape.kt:19-25`](../../app/src/main/kotlin/io/github/valnrys/teambayes/ui/theme/Shape.kt#L19-L25)) hands the same values to Material, so cards and chips pick them up
 by default. Buttons default to a pill, so the app's button helpers pass the button shape
 explicitly.
+
+### Layout: a pinned footer on every step
+
+Each step sits in the same frame, **`StepLayout`** in `TeamComponents.kt`
+([`TeamComponents.kt:376-429`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L376-L429)): a body that takes all the spare height and scrolls on
+its own, a thin divider in the subtle `outlineVariant` colour, and a footer pinned to
+the bottom with that step's main controls. The original kept its roster this way, with
+the player list scrolling in its own box while the buttons stayed put. **While the
+keyboard is open, the footer hides**, so typing never squeezes the body into a sliver.
+The Scaffold's `safeDrawing` insets include the keyboard, so the body then ends just
+above it, and the buttons come back when the keyboard closes. No step needs
+`imePadding`. Every body starts with its heading 16 dp from the top, so the steps line
+up as you move between them.
 
 The window theme in `res/values/themes.xml` ([`themes.xml:8-10`](../../app/src/main/res/values/themes.xml#L8-L10)) and its `values-night`
 twin ([`themes.xml:3-5`](../../app/src/main/res/values-night/themes.xml#L3-L5)) set the window background to the Compose background, so
@@ -408,8 +425,7 @@ can be cancelled. *Android idea here: see [learning.md](../learning.md#viewmodel
   and a hidden lock would act unseen. **`noticeShown`** ([`MatchDayViewModel.kt:368`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L368))
   clears the notice once the snackbar has shown it.
 - **`back`** ([`MatchDayViewModel.kt:377-398`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L377-L398)) goes one step back. From the generate or
-  manual step it drops your edits, as the original does, and also the proposals and locks, which the
-  roster step can neither show nor change. From confirm it
+  manual step it drops edits, proposals and locks, as the original does. From confirm it
   keeps them and returns to the board you came from, manual or generate.
 
 #### The balancer
@@ -465,121 +481,157 @@ every step.
 **What it's for:** ticking players, searching, adding someone new, then choosing how to
 make teams.
 
-**`RosterStep`** ([`RosterStep.kt:49-106`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L49-L106)) is one `LazyColumn`, a list that only builds
-the rows on screen, with the header, fields and buttons as single items so the whole
-step scrolls as one page.
+**`RosterStep`** ([`RosterStep.kt:56-125`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L56-L125)) puts everything except the buttons in one
+scrolling `LazyColumn` ([`RosterStep.kt:62-101`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L62-L101)), a list that only builds the rows on
+screen: the title and count, the search field, the player rows and, last, "+ New
+player", which sits under the list as in the original. Scrolling it all as one means
+even a short screen, such as landscape at a large font size, can reach every part. The
+footer ([`RosterStep.kt:103-123`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L103-L123)) holds only any problem and the two buttons, "Make
+teams manually" and "Generate teams (n) →" (which reads "Generating…" while it runs), so
+they're always in reach except while the keyboard is open. Both buttons need two ticks.
 
-- **The search field** ([`RosterStep.kt:58-67`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L58-L67)) uses a real floating label rather than
+- **The search field** ([`RosterStep.kt:70-84`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L70-L84)) uses a real floating label rather than
   a placeholder, so it stays visible while you type and TalkBack reads it as the field's
-  name.
-- **The rows** use `key = { it.id }` ([`RosterStep.kt:69-77`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L69-L77)), so a tick stays on the
+  name. The list filters as you type, so the keyboard's Search key only has to close the
+  keyboard, which brings the buttons back ([`RosterStep.kt:78-80`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L78-L80)).
+- **The rows** use `key = { it.id }` ([`RosterStep.kt:86-94`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L86-L94)), so a tick stays on the
   right person while the search narrows the list. With no matches, a hint suggests
-  adding someone ([`RosterStep.kt:78-80`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L78-L80)).
-- **The buttons** ([`RosterStep.kt:83-102`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L83-L102)): "Make teams manually" and "Generate teams
-  (n) →", which reads "Generating…" while it runs. Both need two ticks.
+  adding someone ([`RosterStep.kt:95-97`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L95-L97)). The list's test tag, **`ROSTER_LIST_TAG`**
+  ([`RosterStep.kt:43`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L43)), lets the UI tests find it and scroll it.
+- **"+ New player"** is the list's last item ([`RosterStep.kt:98-100`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L98-L100)), so you scroll
+  to the bottom of the roster to add someone. **Surprise:** the header, search field and
+  new-player field each have a fixed item key, like the rows. Without one, an item is
+  identified by its position, so as a search or an Add changed the rows above, the field
+  would become a "different" item, lose focus, and close the keyboard mid-typing.
 
-**`RosterHeader`** ([`RosterStep.kt:109-134`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L109-L134)) is the title plus an "n selected" pill.
-The pill is a polite **live region** ([`RosterStep.kt:129-130`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L129-L130)): TalkBack reads the new
+**`RosterHeader`** ([`RosterStep.kt:128-153`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L128-L153)) is the title plus an "n selected" pill.
+The pill is a polite **live region** ([`RosterStep.kt:148-149`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L148-L149)): TalkBack reads the new
 count after each tick, once it has finished reading the row.
 
-**`PlayerRow`** ([`RosterStep.kt:143-155`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L143-L155)) makes the whole 52 dp row one target.
-`toggleable(role = Role.Checkbox)` ([`RosterStep.kt:149`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L149)) turns the row into a single
+**`PlayerRow`** ([`RosterStep.kt:162-174`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L162-L174)) makes the whole 52 dp row one target.
+`toggleable(role = Role.Checkbox)` ([`RosterStep.kt:168`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L168)) turns the row into a single
 checkbox for TalkBack, and the `Checkbox` inside only draws, so one tap is never handled
-twice. **`RosterRowHeight`** ([`RosterStep.kt:39`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L39)) is 52 dp, a little taller than the
+twice. **`RosterRowHeight`** ([`RosterStep.kt:40`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L40)) is 52 dp, a little taller than the
 48 dp minimum, as in the original. *Android idea here: see [learning.md](../learning.md#semantics-for-talkback).*
 
-**`NewPlayerField`** ([`RosterStep.kt:162-192`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L162-L192)) is a text field with an Add button. The
-keyboard capitalises words and its Done key adds ([`RosterStep.kt:177-181`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L177-L181)). A
+**`NewPlayerField`** ([`RosterStep.kt:181-213`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L181-L213)) is a text field with an Add button. The
+keyboard capitalises words and its Done key adds ([`RosterStep.kt:198-202`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L198-L202)). A
 duplicate marks the field as an error with "Player 'Sam' already exists" underneath
-([`RosterStep.kt:175-176`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L175-L176)), which TalkBack reads with the field. Add is disabled while
-the field is blank.
+([`RosterStep.kt:196-197`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L196-L197)), which TalkBack reads with the field. Add is disabled while
+the field is blank. When the keyboard opens for it, the footer hides and the list ends
+just above the keyboard, so the field stays in view as you type.
 
 ### `PickSplitStep.kt`: "Pick a split"
 
 **What it's for:** showing the three proposals, letting you choose one, adjust it, lock
 players and re-generate.
 
-**`PickSplitStep`** ([`PickSplitStep.kt:44-94`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L44-L94)) shows the heading, a note when the
-search was sampled ([`PickSplitStep.kt:55`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L55)), a hint, any problem, then the cards. The
-cards sit in a column marked `selectableGroup()` ([`PickSplitStep.kt:60-61`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L60-L61)), so
-TalkBack treats them as one set of choices ("1 of 3"). Only the chosen card shows hand
-edits; the others stay as proposed ([`PickSplitStep.kt:64-65`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L64-L65)). While the balancer
-runs, nothing on the cards responds ([`PickSplitStep.kt:76-78`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L76-L78)). Below the cards: the
-meter line while editing, "↻ Re-generate", and Back / Continue. *Android idea here: see
-[learning.md](../learning.md#selectablegroup-and-radio-semantics).*
+**`PickSplitStep`** ([`PickSplitStep.kt:48-66`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L48-L66)) puts the cards in the scrolling body
+and pins a footer ([`PickSplitStep.kt:54-64`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L54-L64)): the meter line, "↻ Re-generate", and
+Back / Continue. The meter line is always there, blank until the first move, so the
+footer doesn't jump when the numbers arrive. Pinning the meter and Re-generate goes
+slightly beyond the original, which pinned only its roster buttons. It's deliberate: you
+can move a chip and watch the numbers change without scrolling down to find them
+([`PickSplitStep.kt:45-46`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L45-L46)).
 
-**`SplitCard`** ([`PickSplitStep.kt:103-174`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L103-L174)) is one proposal. It's `selectable` with
-`Role.RadioButton` ([`PickSplitStep.kt:127-132`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L127-L132)), so the three cards behave like one
+**`PickSplitBody`** ([`PickSplitStep.kt:69-108`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L69-L108)) is the scrolling part: the heading, a
+note when the search was sampled ([`PickSplitStep.kt:79`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L79)), a hint, any problem, then
+the cards. The cards sit in a column marked `selectableGroup()`
+([`PickSplitStep.kt:84-85`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L84-L85)), so TalkBack treats them as one set of choices ("1 of 3").
+Only the chosen card shows hand edits; the others stay as proposed
+([`PickSplitStep.kt:88-89`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L88-L89)). While the balancer runs, nothing on the cards responds
+([`PickSplitStep.kt:100-102`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L100-L102)). *Android idea here: see [learning.md](../learning.md#selectablegroup-and-radio-semantics).*
+
+**`SplitCard`** ([`PickSplitStep.kt:117-188`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L117-L188)) is one proposal. It's `selectable` with
+`Role.RadioButton` ([`PickSplitStep.kt:141-146`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L141-L146)), so the three cards behave like one
 radio group, and the chosen one gets a 2 dp accent border. Inside: "Option 1", the amber
 EDITED badge if edited, and "Quality 83%" in DM Mono, or "Quality —" while a side is
 empty. A thin bar shows the same number but is hidden from TalkBack
-([`PickSplitStep.kt:154-164`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L154-L164)), so it isn't read twice. **Win chances always add to
-100** ([`PickSplitStep.kt:165-170`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L165-L170)): it rounds the Bibs' chance and gives the Non-bibs
+([`PickSplitStep.kt:168-178`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L168-L178)), so it isn't read twice. **Win chances always add to
+100** ([`PickSplitStep.kt:179-184`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L179-L184)): it rounds the Bibs' chance and gives the Non-bibs
 the rest. The original rounded each side, which could show 51% and 50%.
 
-**`SideColumn`** ([`PickSplitStep.kt:177-204`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L177-L204)) is one team: "BIBS · 52%", then a chip
-per player. On the chosen card a chip moves its player ([`PickSplitStep.kt:197-198`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L197-L198));
+**`SideColumn`** ([`PickSplitStep.kt:191-218`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L191-L218)) is one team: "BIBS · 52%", then a chip
+per player. On the chosen card a chip moves its player ([`PickSplitStep.kt:211-212`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L211-L212));
 on the others, `onMove` is `null`, so a tap falls through to the card and chooses it.
 Every chip on every card has a lock.
 
 ### `ManualStep.kt`: "Make teams manually"
 
 **What it's for:** building teams without the balancer. **`ManualStep`**
-([`ManualStep.kt:25-59`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ManualStep.kt#L25-L59)) shows three columns, Pool, Bibs and Non-bibs
-([`ManualStep.kt:39-55`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ManualStep.kt#L39-L55)), and each chip tap moves its player one place round. Each chip
-tells TalkBack where it's going next, via `nextPlace`. The meter line appears once both
-teams have someone. Continue unlocks when the pool is empty and both teams have someone,
-whatever the meter says.
+([`ManualStep.kt:28-39`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ManualStep.kt#L28-L39)) pins the meter line and Back / Continue in its footer.
+**`ManualBoard`** ([`ManualStep.kt:42-72`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ManualStep.kt#L42-L72)) is the scrolling part: the heading, a hint,
+and three columns, Pool, Bibs and Non-bibs ([`ManualStep.kt:54-70`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ManualStep.kt#L54-L70)). Each chip tap
+moves its player one place round, and each chip tells TalkBack where it's going next,
+via `nextPlace`. The meter line in the footer stays blank until both teams have someone.
+Continue unlocks when the pool is empty and both teams have someone, whatever the meter
+says.
 
 ### `ConfirmStep.kt`: "Confirm teams"
 
 **What it's for:** a last look before the game would be saved. **`ConfirmStep`**
-([`ConfirmStep.kt:31-75`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt#L31-L75)) shows the heading with a GENERATED, EDITED or MANUAL badge
-([`ConfirmStep.kt:47-48`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt#L47-L48)), the two teams as plain chips, and Back plus Confirm. If the
-teams differ by more than one, the button turns amber and reads "Teams uneven (6 v 4) —
-sure?" ([`ConfirmStep.kt:60-73`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt#L60-L73)). It's a nudge, not a lock: tapping it still confirms.
-**`Selection.label()`** ([`ConfirmStep.kt:78-82`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt#L78-L82)) picks the badge word. There's no date
-field yet, a documented divergence, because nothing is saved and a date would be thrown
-away.
+([`ConfirmStep.kt:34-58`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt#L34-L58)) pins Back and Confirm in its footer. If the teams differ by
+more than one, the button turns amber and reads "Teams uneven (6 v 4) — sure?"
+([`ConfirmStep.kt:44-54`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt#L44-L54)). It's a nudge, not a lock: tapping it still confirms.
+**`ConfirmSummary`** ([`ConfirmStep.kt:61-88`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt#L61-L88)) is the scrolling part: the heading with
+a GENERATED, EDITED or MANUAL badge ([`ConfirmStep.kt:75-76`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt#L75-L76)) and the two teams as
+plain chips. **`Selection.label()`** ([`ConfirmStep.kt:91-95`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt#L91-L95)) picks the badge word.
+There's no date field yet, a documented divergence, because nothing is saved and a date
+would be thrown away.
 
 ### `TeamComponents.kt`: the shared pieces
 
 **What it's for:** the building blocks more than one step uses.
 
-- **Small helpers** ([`TeamComponents.kt:51-70`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L51-L70)): `DisabledAlpha` (Material's 38%),
+- **Small helpers** ([`TeamComponents.kt:60-79`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L60-L79)): `DisabledAlpha` (Material's 38%),
   `MinTouchTarget` (48 dp), `percent()` (0.523 → 52), and `label()` for a `Side` and a
   `Place`.
-- **`StepHeading`** ([`TeamComponents.kt:77-84`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L77-L84)): a step title in the serif face,
+- **`StepHeading`** ([`TeamComponents.kt:86-93`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L86-L93)): a step title in the serif face,
   marked as a heading so TalkBack users can jump between steps. **`ProblemText`**
-  ([`TeamComponents.kt:90-99`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L90-L99)): an error-coloured message in a polite live region, read
-  out as soon as it appears. **`HintText`** ([`TeamComponents.kt:102-105`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L102-L105)): smaller
-  muted help text.
-- **`Badge`** ([`TeamComponents.kt:111-126`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L111-L126)): an outlined pill with an uppercase word,
+  ([`TeamComponents.kt:99-108`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L99-L108)): an error-coloured message in a polite live region,
+  read out as soon as it appears. **`HintText`** ([`TeamComponents.kt:111-114`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L111-L114)):
+  smaller muted help text.
+- **`Badge`** ([`TeamComponents.kt:120-135`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L120-L135)): an outlined pill with an uppercase word,
   for EDITED and the confirm badge.
-- **`TeamColumn`** ([`TeamComponents.kt:139-153`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L139-L153)): a header then one chip per player,
+- **`TeamColumn`** ([`TeamComponents.kt:148-162`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L148-L162)): a header then one chip per player,
   or "—" if empty. The chip is a **slot**, a composable passed in by the caller, so one
   column serves proposals, the manual board and the confirm step without a pile of
   flags.
-- **`PlayerChip`** ([`TeamComponents.kt:181-225`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L181-L225)) is one player, and the most careful
+- **`PlayerChip`** ([`TeamComponents.kt:190-234`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L190-L234)) is one player, and the most careful
   piece of accessibility work in the app. Every chip is one TalkBack stop named
   "Ottoline, Bibs", so the side is spoken even where colour or position would show it
-  ([`TeamComponents.kt:204-209`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L204-L209)). The visible name is hidden from TalkBack so it isn't
-  read twice ([`TeamComponents.kt:217-218`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L217-L218)). A tappable chip is a button at least 48 dp
+  ([`TeamComponents.kt:213-218`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L213-L218)). The visible name is hidden from TalkBack so it isn't
+  read twice ([`TeamComponents.kt:226-227`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L226-L227)). A tappable chip is a button at least 48 dp
   tall whose `onClickLabel` makes TalkBack say "double-tap to move to Non-bibs" instead
   of the generic "double-tap to activate".
-- **`LockToggle`** ([`TeamComponents.kt:235-261`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L235-L261)) is the 🔓/🔒 beside a chip: a separate
+- **`LockToggle`** ([`TeamComponents.kt:244-270`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L244-L270)) is the 🔓/🔒 beside a chip: a separate
   48 dp target, so moving and locking can't be confused. It's a toggle with
-  `Role.Switch` named "Lock Ottoline to Bibs" ([`TeamComponents.kt:242`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L242)); TalkBack adds
+  `Role.Switch` named "Lock Ottoline to Bibs" ([`TeamComponents.kt:251`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L251)); TalkBack adds
   "on" or "off". **Surprise:** emoji can't be tinted, so a locked padlock also sits on
   an accent-tinted circle, and the state shows in colour as well as shape. A disabled
   lock is drawn at 38%.
-- **`MeterLine`** ([`TeamComponents.kt:279-292`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L279-L292)): "Model: 64% Bibs · quality 83%",
+- **`MeterLine`** ([`TeamComponents.kt:291-309`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L291-L309)): "Model: 64% Bibs · quality 83%",
   naming whichever side the model favours, worked out exactly as on the cards so the two
   never disagree by a point. It's a polite live region, so TalkBack reads the new
-  numbers after each move. Divergence: quality is a percentage, matching the cards, not
-  a decimal like "0.83".
+  numbers after each move. **Surprise:** it's always one `Text`, whose words are simply
+  empty while there's no meter ([`TeamComponents.kt:295-308`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L295-L308)). The line keeps its
+  height, so the pinned footer doesn't jump when the first move brings the numbers in,
+  and because it's the same node throughout, TalkBack hears one live region change
+  rather than a new node appearing. Divergence: quality is a percentage, matching the
+  cards, not a decimal like "0.83".
+- **`StepLayout(contentPadding, body, footer)`** ([`TeamComponents.kt:376-429`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L376-L429)) is the
+  frame every step uses. The body is wrapped in a `Box` ([`TeamComponents.kt:411-417`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L411-L417))
+  with `Modifier.weight(1f)`, which gives it whatever height the footer leaves, so the
+  one `LazyColumn` or `verticalScroll` column inside it scrolls in that space.
+  `clipToBounds()` stops scrolled content drawing over the footer. Body and footer are
+  each marked `isTraversalGroup`, so TalkBack reads the whole body before moving to the
+  footer. The divider and footer, a column of controls spaced 10 dp apart, are drawn
+  only while `WindowInsets.isImeVisible` is false ([`TeamComponents.kt:418-427`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L418-L427)): when
+  the keyboard opens they hide, and since the Scaffold's padding includes the keyboard,
+  the body ends just above it. `isImeVisible` is still marked experimental, hence the
+  `@OptIn`. *Android idea here: see [learning.md](../learning.md#modifierweight-and-scrolling-one-part-of-a-screen).*
 - **`ButtonRow`**, **`PrimaryButton`**, **`GhostButton`** and **`BackContinueRow`**
-  ([`TeamComponents.kt:298-357`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L298-L357)): buttons sharing the width equally, in the app's shape
+  ([`TeamComponents.kt:315-374`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt#L315-L374)): buttons sharing the width equally, in the app's shape
   and 52 dp height, so long labels wrap instead of pushing the other button off screen.
 
 ### The resources
@@ -679,14 +731,21 @@ Generate fail after ticks change ([`MatchDayViewModelTest.kt:268-281`](../../app
 which can't be met show the engine's reason and keep the old proposals
 ([`MatchDayViewModelTest.kt:308-320`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModelTest.kt#L308-L320)).
 
-**`MatchDayScreenTest.kt`** (4 tests, on a phone) drives the real screens by visible
-text and by the names TalkBack reads ([`MatchDayScreenTest.kt:21-24`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L21-L24)). It finds a chip
-by its TalkBack name plus its button role ([`MatchDayScreenTest.kt:34-40`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L34-L40)), which also
-proves those names exist. It covers: generate then move a chip to get EDITED and the
-meter ([`MatchDayScreenTest.kt:81-85`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L81-L85)); the discard dialog's Cancel and Discard
-([`MatchDayScreenTest.kt:87-100`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L87-L100)); the manual board through to confirm
-([`MatchDayScreenTest.kt:102-124`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L102-L124)); and the amber uneven button still confirming
-([`MatchDayScreenTest.kt:126-140`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L126-L140)). It waits up to five seconds for results, because
+**`MatchDayScreenTest.kt`** (5 tests, on a phone) drives the real screens by visible
+text and by the names TalkBack reads ([`MatchDayScreenTest.kt:27-30`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L27-L30)). It finds a chip
+by its TalkBack name plus its button role ([`MatchDayScreenTest.kt:40-46`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L40-L46)), which also
+proves those names exist. Because the roster list is lazy, a row below the fold doesn't
+exist until it's scrolled to, so `tickFour` scrolls the list itself, found by
+`ROSTER_LIST_TAG`, with `performScrollToNode`, then taps each name and checks it's
+ticked straight away, while the row is certainly still on screen
+([`MatchDayScreenTest.kt:56-67`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L56-L67)). Pinned buttons are on screen whenever the keyboard is
+closed, so `tap` just clicks them ([`MatchDayScreenTest.kt:69-72`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L69-L72)). It covers: typing
+in the search field shows only the matching player ([`MatchDayScreenTest.kt:95-105`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L95-L105));
+generate then move a chip to get EDITED and the meter
+([`MatchDayScreenTest.kt:107-111`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L107-L111)); the discard dialog's Cancel and Discard
+([`MatchDayScreenTest.kt:113-126`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L113-L126)); the manual board through to confirm
+([`MatchDayScreenTest.kt:128-150`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L128-L150)); and the amber uneven button still confirming
+([`MatchDayScreenTest.kt:152-166`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L152-L166)). It waits up to five seconds for results, because
 the balancer runs on a real thread the test rule doesn't track.
 
 **`BalancerTimingTest.kt`** (2 tests, on a phone) runs the balancer twice to warm up,
@@ -712,12 +771,13 @@ These are deliberate for now.
   original did next, come with storage, as does the date field.
 - **No release shrinking.** R8, which strips unused code from release builds, is
   deferred to the release-signing work so both can be tested together ([decisions.md](../decisions.md)).
-- **Timing.** On a Pixel 9 Pro, 18 players take a median of about 66 ms and 20 players
-  about 270 ms. That's fine on a background thread behind "Generating…", but there's
-  room to speed it up. The timing test asks for 5 splits while the app asks for 3; the
-  cost is in trying every split, so that barely matters. With more than 100,000 possible
-  splits (over 20 players, unless locks cut the count) the balancer samples, and the
-  step says so.
+- **Timing varies.** On a Pixel 9 Pro, 18 players take a median of about 65 ms. 20
+  players took between about 180 and 280 ms across runs: a phone's speed shifts with its
+  temperature, power state and what else is running. That's fine on a background thread
+  behind "Generating…", but there's room to speed it up. The timing test asks for 5
+  splits while the app asks for 3; the cost is in trying every split, so that barely
+  matters. With more than 100,000 possible splits (over 20 players, unless locks cut the
+  count) the balancer samples, and the step says so.
 - **The guard doesn't check the test APK** ([`build.gradle.kts:140-141`](../../app/build.gradle.kts#L140-L141)). It never
   ships to users, but a test library could add a permission there unnoticed.
 
@@ -749,11 +809,18 @@ also suggests making teams by hand.
 
 **What if I tap things while it's generating?** Changing who's playing cancels the run.
 Changing the teams on show is ignored until the new proposals land. The buttons and
-cards also stop responding (the buttons and locks visibly dim), so this is mostly belt and braces (section 6).
+cards also grey out, so this is mostly belt and braces (section 6).
 
 **Why pass one `MatchDayActions` interface instead of lambdas?** Sixteen actions as
 separate lambdas would make every step's signature a wall of parameters. One interface
 keeps them short, and previews pass `NoActions`.
+
+**Why are the buttons pinned to the bottom?** On a phone, 14 players pushed Generate off
+the bottom of the screen, so you had to scroll past everyone to reach it. The original
+keeps its actions visible below a scrolling list, so the app does the same. On "Pick a
+split" it goes slightly further and pins the meter line and Re-generate too, so you can
+watch the numbers while you move chips. The one exception is typing: while the keyboard
+is open the footer hides, so the field you're typing in keeps its room.
 
 **Why bundle the fonts instead of downloading them?** Downloadable fonts arrive through
 a provider app over the network, which would break the offline promise by proxy.

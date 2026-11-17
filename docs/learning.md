@@ -293,6 +293,25 @@ val MaterialTheme.teamBayesColors: TeamBayesColors
 (Simplified: the doc comment is left out.) The theme provides the light or dark set, and
 screens write `MaterialTheme.teamBayesColors.amber`. Same file as Material 3 theming.
 
+### `Modifier.weight` and scrolling one part of a screen
+In a `Column`, `Modifier.weight(1f)` gives a child whatever height the others leave over.
+Put a scrolling list in that child and only the list scrolls; everything above and below
+it stays where it is. That's how every match-day step keeps its buttons on screen:
+
+```kotlin
+Box(
+    modifier = Modifier
+        .weight(1f)
+        .fillMaxWidth()
+        .clipToBounds()
+        .semantics { isTraversalGroup = true },
+) { body() }
+```
+(Simplified: the footer below it is left out.) The footer is measured first, and the
+body fills the rest. `clipToBounds()` stops the scrolled content drawing over the footer.
+See
+[TeamComponents.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamComponents.kt).
+
 ### Semantics for TalkBack
 TalkBack is Android's screen reader. It doesn't see pixels; it reads **semantics**, a
 description of each element. Modifiers add to it: `toggleable` makes a row one checkbox,

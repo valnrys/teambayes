@@ -182,9 +182,10 @@ tested together on a signed build.
 ## On-phone balancing time
 *2026-11-16*
 
-Measured on a Pixel 9 Pro: balancing 18 players takes a median of about 66 ms, and 20 players
-(the exhaustive limit) a median of about 270 ms. The work runs off the main thread, so the
-screen stays responsive.
+Measured on a Pixel 9 Pro: balancing 18 players takes a median of about 65 ms. 20 players
+(the exhaustive limit) took a median of between about 180 and 280 ms across runs; a
+phone's speed varies from run to run. The work runs off the main thread, so the screen
+stays responsive.
 
 ## Match day copies the original web version's flow
 *2026-11-17*
@@ -260,3 +261,16 @@ tap that changes the teams on show (moving, locking, choosing a card, Continue,
 re-generate) is ignored until the new proposals arrive, because they would replace it.
 The balancer's maths doesn't stop when cancelled, but a cancelled run can never publish
 its result.
+
+## Pinned action footers
+*2026-11-17*
+
+Every match-day step has a scrolling body and a footer pinned to the bottom of the screen
+with that step's main actions. On a phone, a 14-player roster pushed Generate off the
+screen, and the original web version keeps its roster actions visible below a scrolling
+list, so the app does the same. "Pick a split" goes slightly beyond the original: it pins
+the meter line and Re-generate as well as Back and Continue, so you can watch the numbers
+while you move players. On the roster, everything else (title, search, players and
+"+ New player", last as in the original) scrolls as one list, so a short screen can still
+reach every part. While the keyboard is open the footer hides, so typing never squeezes
+the list; the screen's `safeDrawing` insets keep the list clear of the keyboard.
