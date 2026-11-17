@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    A disc split into two halves, one per team, on a 108dp canvas. Launchers crop to
+    the middle 66dp, and the disc (radius 26) sits comfortably inside that.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Left half: white. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,28 A26,26 0 0 0 54,80 Z" />
+    <!-- Right half: light mint. -->
+    <path
+        android:fillColor="#86EFAC"
+        android:pathData="M54,28 A26,26 0 0 1 54,80 Z" />
+</vector>

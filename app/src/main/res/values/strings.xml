@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TeamBayes</string>
+
+    <!-- Wording follows the original web version of this tool. -->
+
+    <!-- Shared -->
+    <string name="bibs">Bibs</string>
+    <string name="non_bibs">Non-bibs</string>
+    <string name="pool">Pool</string>
+    <string name="back">← Back</string>
+    <string name="continue_button">Continue →</string>
+    <string name="empty_column">—</string>
+
+    <!-- Roster step -->
+    <string name="roster_heading">Who\'s playing?</string>
+    <plurals name="selected_count">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+    <string name="search_players">Search players…</string>
+    <string name="no_players_match">No players match. Add one below.</string>
+    <string name="new_player">+ New player</string>
+    <string name="add">Add</string>
+    <string name="player_already_exists">Player \'%1$s\' already exists</string>
+    <string name="make_teams_manually">Make teams manually</string>
+    <string name="generate_teams">Generate teams (%1$d) →</string>
+    <string name="generating">Generating…</string>
+
+    <!-- Generate step -->
+    <string name="pick_a_split">Pick a split</string>
+    <string name="sampled_note">Large roster — sampled search used (still very close to optimal).</string>
+    <string name="tap_chip_hint">Tap a player chip to swap their team.</string>
+    <string name="no_splits">No splits generated.</string>
+    <string name="option_number">Option %1$d</string>
+    <string name="edited">Edited</string>
+    <string name="quality_percent">Quality %1$d%%</string>
+    <string name="quality_unknown">Quality —</string>
+    <string name="team_with_percent">%1$s · %2$d%%</string>
+    <string name="regenerate">↻ Re-generate</string>
+    <string name="regenerating">Re-generating…</string>
+    <string name="meter_line">Model: %1$d%% %2$s · quality %3$d%%</string>
+
+    <!-- Player chips and locks (TalkBack names) -->
+    <string name="chip_name">%1$s, %2$s</string>
+    <string name="move_to">move to %1$s</string>
+    <string name="lock_to">Lock %1$s to %2$s</string>
+    <string name="lock_locked">🔒</string>
+    <string name="lock_unlocked">🔓</string>
+
+    <!-- Discard dialog -->
+    <string name="discard_edits">Discard your edits?</string>
+    <string name="cancel">Cancel</string>
+    <string name="discard">Discard</string>
+
+    <!-- Manual board -->
+    <string name="manual_hint">Tap a player to move them: Pool → Bibs → Non-bibs → Pool.</string>
+
+    <!-- Confirm step -->
+    <string name="confirm_teams">Confirm teams</string>
+    <string name="selection_generated">Generated</string>
+    <string name="selection_edited">Edited</string>
+    <string name="selection_manual">Manual</string>
+    <string name="confirm">Confirm ✓</string>
+    <string name="teams_uneven">Teams uneven (%1$d v %2$d) — sure?</string>
+    <string name="notice_saving_next_milestone">Saving games arrives in the next milestone</string>
+
+    <!-- Reasons the balancer can refuse -->
+    <string name="problem_too_few">Generating teams needs at least 4 players. With fewer, make teams manually.</string>
+    <string name="problem_too_many">Too many players selected. The most we can balance is 64.</string>
+    <string name="problem_locks">Those locks can\'t all be met. Unlock someone and re-generate.</string>
+    <string name="problem_unexpected">Something went wrong. Please try again.</string>
+</resources>

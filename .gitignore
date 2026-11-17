@@ -9,3 +9,9 @@ local.properties
 __pycache__/
 *.pyc
 /private/
+.cxx/
+.externalNativeBuild
+captures/
+*.apk
+*.aab
+*.hprof

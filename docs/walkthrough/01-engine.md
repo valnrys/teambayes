@@ -13,7 +13,7 @@ docs disagree, this follows the code. Every `File.kt:line` link jumps to the lin
 ## 1. The engine in one page
 
 **What it does.** It works out how good each player probably is from who played whom
-and who won, then uses that to split tonight's players into the most even two teams.
+and who won, then uses that to split match-day players into the most even two teams.
 It's plain Kotlin with no Android and no runtime libraries beyond Kotlin's standard
 library and the JDK
 ([`build.gradle.kts:26-31`](../../engine/build.gradle.kts#L26-L31)).
@@ -36,7 +36,7 @@ library and the JDK
                               ▼                               └─ NormalDist
         current ratings + history      history is for charts
                               │
-        tonight's players ────┤        plus optional locks ("p03 plays for A")
+        match-day players ────┤        plus optional locks ("p03 plays for A")
                               ▼
                      Balancer.balance  scores each split with predictDraw
                               │
@@ -163,7 +163,7 @@ openskill's draw helpers computes `pdf(-t) - pdf(t)` and needs an exact `0.0`, a
 fixtures check this.
 
 **`invCdf(p)`** ([`NormalDist.kt:80-148`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/NormalDist.kt#L80-L148)): the reverse of `cdf`. Given an area `p`, it
-finds the `x` that has that much area to its left. Only `predictDraw` uses it, to turn
+finds the `x` that has that much area to its left. Only the draw maths (`predictDraw` and `quality`) uses it, to turn
 "draws happen 1 time in n" into a draw margin. It's a port of CPython's version of
 Wichura's AS241 algorithm, which uses three hand-tuned fractions of polynomials: one
 for the middle of the range ([`NormalDist.kt:84-103`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/NormalDist.kt#L84-L103)) and two for the tails
@@ -252,10 +252,15 @@ team wins. It's `cdf(gap in team mu / spread)`, where the spread combines two be
 (one per team's form on the night) and both teams' uncertainty. Equal teams give
 0.5. **Note:** no tau here, and no share for draws: team B's chance is just `1 - pA`.
 
-**`predictDraw(teamA, teamB)`** ([`ThurstoneMostellerFull.kt:131-146`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L131-L146)): the chance of a
+**`predictDraw(teamA, teamB)`** ([`ThurstoneMostellerFull.kt:131-135`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L131-L135)): the chance of a
 draw, which the balancer maximises. It sets a draw band around "level" and measures
-how much of the predicted gap's bell curve lands in it. **Surprises**
-([`ThurstoneMostellerFull.kt:133-139`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L133-L139)):
+how much of the predicted gap's bell curve lands in it. Since milestone 2 the working
+lives in a private helper, `drawTerms()` ([`ThurstoneMostellerFull.kt:204-217`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L204-L217)), which works out the team
+totals, the draw margin and the spread once and returns them as a small `DrawTerms`
+object ([`ThurstoneMostellerFull.kt:187-202`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L187-L202)). Its `drawChance` ([`ThurstoneMostellerFull.kt:199-201`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L199-L201)) is openskill's
+expression term for term, and `predictDraw` calls it with the real totals, so the answers
+are bit-for-bit what they were. **Surprises**
+([`ThurstoneMostellerFull.kt:205-211`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L205-L211)):
 
 - It assumes draws happen 1 time in `n` (with `n` players), which isn't configurable and
   isn't learned from your group's real draw rate. (openskill's choice.)
@@ -267,29 +272,35 @@ how much of the predicted gap's bell curve lands in it. **Surprises**
   second time. Harmless for ranking splits, since every split of one roster has the
   same `n`.
 
-**`updateTeam(...)`** ([`ThurstoneMostellerFull.kt:152-195`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L152-L195), private): new ratings for
+**`quality(teamA, teamB)`** ([`ThurstoneMostellerFull.kt:170-177`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L170-L177)), added in milestone 2: how even a game is,
+from 0 to 1. It divides the draw chance by the draw chance the same players would have
+with both teams' totals exactly level, so 1.0 means "as even as these players could be".
+It ranks splits exactly as `predictDraw` does, and it's the "Quality" the app shows. See
+[walkthrough 2](02-match-day.md#5-the-engines-quality) for how and why.
+
+**`updateTeam(...)`** ([`ThurstoneMostellerFull.kt:223-266`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L223-L266), private): new ratings for
 one team's players. Here's the intuition without the derivation:
 
-- `c` ([`ThurstoneMostellerFull.kt:160`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L160)) is the total spread of the contest: both teams'
+- `c` ([`ThurstoneMostellerFull.kt:231`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L231)) is the total spread of the contest: both teams'
   uncertainty plus two betas of match-day luck.
-- `deltaMu` ([`ThurstoneMostellerFull.kt:161`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L161)) is how much better this team was expected
+- `deltaMu` ([`ThurstoneMostellerFull.kt:232`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L232)) is how much better this team was expected
   to be, measured in units of `c`. Big and positive means "we were clear favourites".
-- `t` ([`ThurstoneMostellerFull.kt:166`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L166)) is the draw margin in the same units. **Quirk:**
+- `t` ([`ThurstoneMostellerFull.kt:237`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L237)) is the draw margin in the same units. **Quirk:**
   openskill uses it for wins and losses too, not only draws.
 - `omega` is how far the team's mu moves; `delta` is how much of its variance (sigma², the
   spread squared) we remove.
-  The `when` ([`ThurstoneMostellerFull.kt:171-184`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L171-L184)) picks the formulas for a win, a
+  The `when` ([`ThurstoneMostellerFull.kt:242-255`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L242-L255)) picks the formulas for a win, a
   loss or a draw. *Kotlin idea: `when` is a tidier `if / else if / else`.*
 - Each player then takes a slice of the team's change in proportion to their own
-  variance ([`ThurstoneMostellerFull.kt:188-194`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L188-L194)). The player we know least about moves
+  variance ([`ThurstoneMostellerFull.kt:259-265`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L259-L265)). The player we know least about moves
   most. Their sigma, already widened by tau in step 1, is multiplied by
-  `sqrt(1 - share * delta)`, and never falls below `sqrt(kappa)` times that value ([`ThurstoneMostellerFull.kt:192`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L192)). That floor only bites with absurd
+  `sqrt(1 - share * delta)`, and never falls below `sqrt(kappa)` times that value ([`ThurstoneMostellerFull.kt:263`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L263)). That floor only bites with absurd
   inputs, like a sigma of 1000.
 
-**`requireTeams`** ([`ThurstoneMostellerFull.kt:197-199`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L197-L199)): both teams must have someone in them.
+**`requireTeams`** ([`ThurstoneMostellerFull.kt:268-270`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L268-L270)): both teams must have someone in them.
 
-**`TeamSum`** ([`ThurstoneMostellerFull.kt:202`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L202)) and **`teamSum(team)`**
-([`ThurstoneMostellerFull.kt:209-217`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L209-L217)): a team's strength is the sum of its players' mu, and
+**`TeamSum`** ([`ThurstoneMostellerFull.kt:273`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L273)) and **`teamSum(team)`**
+([`ThurstoneMostellerFull.kt:280-288`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L280-L288)): a team's strength is the sum of its players' mu, and
 its uncertainty is the sum of their sigma². **Surprise:** players are added in order of
 descending `ordinal`, because that's what openskill does, and floating-point addition
 gives slightly different bits in a different order. A test proves the order matters
@@ -297,24 +308,24 @@ gives slightly different bits in a different order. A test proves the order matt
 [learning.md](../learning.md#why-floating-point-order-matters).*
 
 **The four helper functions** live in an `internal companion object`
-([`ThurstoneMostellerFull.kt:219`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L219)) so the tests can call them directly. *Kotlin idea: a
+([`ThurstoneMostellerFull.kt:290`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L290)) so the tests can call them directly. *Kotlin idea: a
 companion object holds a class's "static" members.* `MACHINE_EPSILON`
-([`ThurstoneMostellerFull.kt:221`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L221)) is 2^-52, the gap between 1.0 and the next double.
+([`ThurstoneMostellerFull.kt:292`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L292)) is 2^-52, the gap between 1.0 and the next double.
 In all four, `x` is `deltaMu` (how much this team was favoured) and `t` is the margin.
 
-- **`v(x, t)`** ([`ThurstoneMostellerFull.kt:228-232`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L228-L232)): **how much a win surprises us**,
+- **`v(x, t)`** ([`ThurstoneMostellerFull.kt:299-303`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L299-L303)): **how much a win surprises us**,
   and so how far mu moves. If you were heavy favourites (`x` large), winning is no news
   and `v` is near 0. If you were big underdogs (`x` very negative), `v` is large: an
   upset moves ratings a lot. When the maths gets too small to divide safely, it uses the
   straight-line limit `-(x - t)`.
-- **`w(x, t)`** ([`ThurstoneMostellerFull.kt:238-246`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L238-L246)): **how much a win teaches us**, as
+- **`w(x, t)`** ([`ThurstoneMostellerFull.kt:309-317`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L309-L317)): **how much a win teaches us**, as
   the fraction of variance to remove, between 0 and 1. An expected result teaches little;
   a shock teaches a lot. **Quirk:** its fallback tests the sign of `x`, not `x - t`.
-- **`vt(x, t)`** ([`ThurstoneMostellerFull.kt:253-261`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L253-L261)): the draw version of `v`. A draw
+- **`vt(x, t)`** ([`ThurstoneMostellerFull.kt:324-332`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L324-L332)): the draw version of `v`. A draw
   pulls both teams towards each other: the favourite moves down, the underdog up. Even
   teams barely move. When the draw band holds less than 1e-5 of the probability, it uses
   a straight line in `x`.
-- **`wt(x, t)`** ([`ThurstoneMostellerFull.kt:267-276`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L267-L276)): the draw version of `w`, falling
+- **`wt(x, t)`** ([`ThurstoneMostellerFull.kt:338-347`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L338-L347)): the draw version of `w`, falling
   back to 1 (the biggest possible shrink) in the extreme case.
 
 Those thresholds (`MACHINE_EPSILON`, `1e-5`) are exactly why `NormalDist` must be so
@@ -325,16 +336,16 @@ precise.
 **What it's for:** the easy, safe way to rate and predict. It works out beta from the
 team sizes, so nobody can pass a player count that doesn't match the teams.
 
-**`WengLin`** ([`WengLin.kt:15`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/WengLin.kt#L15)) is an `object` with four public one-line functions and a private helper:
+**`WengLin`** ([`WengLin.kt:16`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/WengLin.kt#L16)) is an `object` with five public one-line functions and a private helper:
 
-- **`rate`**, **`predictWin`**, **`predictDraw`** ([`WengLin.kt:21-30`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/WengLin.kt#L21-L30)) each build the
+- **`rate`**, **`predictWin`**, **`predictDraw`**, **`quality`** ([`WengLin.kt:22-38`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/WengLin.kt#L22-L38)) each build the
   right model for this game and call the method of the same name on it. *Kotlin idea:
   `fun f(...) = expression` is a function whose body is one expression.*
-- **`forGame(nPlayers)`** ([`WengLin.kt:43-44`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/WengLin.kt#L43-L44)) builds the model for an `n`-player game.
+- **`forGame(nPlayers)`** ([`WengLin.kt:51-52`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/WengLin.kt#L51-L52)) builds the model for an `n`-player game.
   It exists for the balancer, which scores thousands of splits of one roster and
   shouldn't build a model each time. **The catch:** nothing checks that later calls
-  really have `n` players. Prefer the three before it.
-- **`modelFor`** ([`WengLin.kt:47-50`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/WengLin.kt#L47-L50), private) checks for an empty team *before*
+  really have `n` players. Prefer the four before it.
+- **`modelFor`** ([`WengLin.kt:55-58`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/WengLin.kt#L55-L58), private) checks for an empty team *before*
   counting players. Otherwise 1-against-0 would fail with the less helpful "a game needs
   at least two players" from `betaFor`.
 
@@ -409,12 +420,12 @@ a message, see [learning.md](../learning.md#require).*
 
 ### `Balancer.kt`: picking even teams
 
-**What it's for:** given tonight's players and any locks, it finds the `k` splits with
+**What it's for:** given match-day players and any locks, it finds the `k` splits with
 the highest chance of a draw.
 
 #### The types
 
-- **`BalancerPlayer(id, rating)`** ([`Balancer.kt:7`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/Balancer.kt#L7)): someone playing tonight.
+- **`BalancerPlayer(id, rating)`** ([`Balancer.kt:7`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/Balancer.kt#L7)): someone playing on match day.
 - **`Side`** ([`Balancer.kt:10`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/Balancer.kt#L10)): `A` or `B`, for locks.
 - **`Split`** ([`Balancer.kt:18-23`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/Balancer.kt#L18-L23)): the two teams' player ids, the draw chance (the
   score) and team A's win chance.
@@ -595,7 +606,7 @@ test for 18 and 20 players that prints how long it took.
 call it, and TrueSkill, the best-known option, is patented and trademarked. The engine
 also has a rule of zero runtime dependencies: less to audit, nothing to clash with
 Android, and it can be reused elsewhere ([decisions.md](../decisions.md)). The model
-itself is about 700 lines across five files, and the fixtures make every line checkable.
+itself is about 800 lines across five files, and the fixtures make every line checkable.
 
 **Why copy a bug?** The fixtures come from what openskill *does*, so "fixing" the
 tie-averaging step ([`ThurstoneMostellerFull.kt:96-99`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L96-L99)) would make every draw case
@@ -638,7 +649,7 @@ would justify.
 **How would an iPhone version reuse this?** The engine is plain Kotlin with no Android
 code, so the natural route is Kotlin Multiplatform: compile the same source for iOS as
 well as Android. A handful of Java calls would need small replacements:
-`StrictMath.exp`/`log` in `NormalDist`, `Math.ulp` ([`ThurstoneMostellerFull.kt:221`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L221)),
+`StrictMath.exp`/`log` in `NormalDist`, `Math.ulp` ([`ThurstoneMostellerFull.kt:292`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/ThurstoneMostellerFull.kt#L292)),
 `Math.rint` ([`Balancer.kt:301`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/Balancer.kt#L301)) and `java.util.PriorityQueue` ([`Balancer.kt:3`](../../engine/src/main/kotlin/io/github/valnrys/teambayes/engine/Balancer.kt#L3)). The
 `StrictMath` swap is the delicate one, since it's what guarantees identical bits. The
 fixtures would come too, so an iOS build would be held to the same 1e-9 standard.

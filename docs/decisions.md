@@ -124,3 +124,153 @@ The app stores players and games, not ratings. Current ratings come from replayi
 every game by when it was played, then when it was entered, then by id. Editing or
 deleting an old game then just means replaying again, with no way for a stored rating to
 drift out of step with the history.
+
+## Android Gradle Plugin 9.5.1 with built-in Kotlin
+*2026-11-16*
+
+The app uses AGP 9.5.1, the latest stable release, on the pinned Gradle 9.8.2 (AGP needs
+9.6.0 or newer). Since AGP 9.0, Kotlin support is built in, so the app does not apply the
+`org.jetbrains.kotlin.android` plugin. Only the Compose compiler plugin is added, at the
+same version as Kotlin.
+
+## minSdk 26, compile and target SDK 37
+*2026-11-16*
+
+minSdk 26 (Android 8.0) lets launcher icons use a single adaptive-icon file and covers
+almost every phone in use. Compile and target SDK are 37, the newest AGP 9.5.1 supports.
+
+## The build fails on any unlisted permission
+*2026-11-16*
+
+TeamBayes is offline, so the app must never request INTERNET. A Gradle task,
+`verifyAllowedPermissions`, sits inside the merged-manifest pipeline, so every build
+that uses an app variant's manifest (APK, bundle, install) runs it first, not just `check`.
+The androidTest APK has its own manifest, which is not checked. It
+is an allowlist: it fails on any permission, from `<uses-permission>` or
+`<uses-permission-sdk-23>`, except AndroidX's own `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`.
+We do not strip permissions with `tools:node="remove"`, because that would silently hide a
+library's request; a person should see it and decide.
+
+## Backup is disabled
+*2026-11-16*
+
+`allowBackup` is false and the data-extraction rules exclude everything. No player data
+should leave the phone through Google's cloud backup. The app will have its own JSON
+export, which the user controls.
+
+## The emoji2 font downloader is removed
+*2026-11-16*
+
+Compose pulls in `androidx.emoji2`, whose start-up initializer can ask a font provider
+to download an emoji font. That is network activity by proxy, so its `meta-data` entry is
+removed from the manifest. The app uses the system's emoji.
+
+## No dynamic colour
+*2026-11-16*
+
+The app has a fixed Material 3 palette, light and dark by system setting (see "A dark-first
+theme with bundled fonts" below).
+Wallpaper-derived colours would make the app look different on every phone and make
+screenshots inconsistent.
+
+## Release shrinking is deferred
+*2026-11-16*
+
+R8 and resource shrinking will come with the release-signing work, so they can be
+tested together on a signed build.
+
+## On-phone balancing time
+*2026-11-16*
+
+Measured on a Pixel 9 Pro: balancing 18 players takes a median of about 65 ms. 20 players
+(the exhaustive limit) took a median of between about 180 and 280 ms across runs; a
+phone's speed varies from run to run. The work runs off the main thread, so the screen
+stays responsive.
+
+## Match day copies the original web version's flow
+*2026-11-17*
+
+The app's match day follows the original web version of this tool closely: the same
+steps (roster, pick a split or make teams by hand, confirm), the same wording and the
+same rules for moving and locking players. The group already knows that flow from real
+nights, so familiarity is worth more than novelty. Where the app differs on purpose, a
+comment in the code says why, so every divergence is a decision rather than drift.
+
+## Three proposals, each with quality and win chances
+*2026-11-17*
+
+Generate shows the balancer's three most even splits, as the original did. Each card
+shows a quality percentage and each side's chance of winning. The win chances are shown
+by the owner's choice, although they aren't well calibrated yet: the ratings start as
+guesses from a ranking, and the model has known biases (see [model.md](model.md)). They
+are commentary only and never block anything. The two chances are rounded so they always
+add up to 100.
+
+## Quality is the draw chance over the draw chance at level totals
+*2026-11-17*
+
+`quality()` divides a split's predicted draw chance by the draw chance the same players
+would have if both teams' total skill were exactly level. That gives 0 to 1, where 1.0 is
+as even as these players could be, and it means the same thing for any roster. Every
+split of one roster shares the same denominator, so quality ranks splits exactly as the
+balancer's draw chance does. The original showed TrueSkill's match quality, which is
+patented, so this measure is built from the model's own maths instead.
+
+## Bibs and Non-bibs
+*2026-11-17*
+
+The two teams are called Bibs and Non-bibs, as on the pitch and in the original. In the
+code, team A is always the Bibs and team B the Non-bibs.
+
+## A dark-first theme with bundled fonts
+*2026-11-17*
+
+The palette, fonts and shapes follow the original web version. The dark scheme came
+first and the light one is derived from it; the app still follows the phone's setting.
+Instrument Serif, DM Sans and DM Mono are bundled in the app under the SIL Open Font
+License (see [NOTICE](../NOTICE)), because downloadable fonts arrive through a provider
+app over the network. Where the original's colours were too faint, they were lightened
+to meet WCAG AA: muted text (`#7B97B4` instead of `#5B7896`, which is only 4.2:1 on the
+background) and the error red (`#F87171` instead of `#EF4444`, only 4.3:1 on raised
+cards). In the dark theme, control borders use `#5B7896`; in the light theme, `#64788E`. Both
+reach the 3:1 that borders need on every surface.
+
+## Moving a player clears their lock
+*2026-11-17*
+
+This is a deliberate divergence from the original, which left locks alone when you
+edited a split. A lock means "keep this player on this side". After a move, the old lock
+would point at the side they just left, so the chip would show a lock that doesn't match,
+and the next re-generate would quietly move them back. Clearing it keeps what the screen
+shows and what re-generate does in step.
+
+## Generate is enabled from two players and explains why it can't run
+*2026-11-17*
+
+Both roster buttons unlock at two ticked players, as in the original. The manual board
+works from two, but the balancer needs four. Rather than grey out Generate with no
+reason, tapping it with two or three players shows the engine's own explanation, which
+also suggests making teams by hand.
+
+## Taps while generating either cancel the run or are ignored
+*2026-11-17*
+
+A tap that changes who's playing (ticking, adding a player, going back, the manual
+board) cancels the balancer run, because its answer would be for the wrong people. A
+tap that changes the teams on show (moving, locking, choosing a card, Continue,
+re-generate) is ignored until the new proposals arrive, because they would replace it.
+The balancer's maths doesn't stop when cancelled, but a cancelled run can never publish
+its result.
+
+## Pinned action footers
+*2026-11-17*
+
+Every match-day step has a scrolling body and a footer pinned to the bottom of the screen
+with that step's main actions. On a phone, a 14-player roster pushed Generate off the
+screen, and the original web version keeps its roster actions visible below a scrolling
+list, so the app does the same. "Pick a split" goes slightly beyond the original: it pins
+the meter line and Re-generate as well as Back and Continue, so you can watch the numbers
+while you move players. On the roster, everything else (title, search, players and
+"+ New player", last as in the original) scrolls as one list, so a short screen can still
+reach every part. While the keyboard is open the footer hides, so typing never squeezes
+the list; the screen's `safeDrawing` insets keep the list clear of the keyboard.

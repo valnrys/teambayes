@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+        TeamBayes is offline. This file declares no permissions; in the merged manifest the
+        build allows only AndroidX's internal DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION.
+
+        There is deliberately no `tools:node="remove"` for INTERNET: that would silently hide
+        a library asking for it. Instead `verifyAllowedPermissions` fails the build on any
+        other permission in the merged manifest, so a person has to audit it and decide.
+    -->
+
+    <!--
+        allowBackup is off on purpose: no player data should leave the phone through
+        Google's cloud backup. The app will offer its own JSON export instead, which the
+        user controls. dataExtractionRules does the same for Android 12+ (cloud backup
+        and phone-to-phone transfer), and fullBackupContent="false" for Android 11 and older.
+    -->
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:usesCleartextTraffic="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.TeamBayes">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+            Remove emoji2's font downloader. EmojiCompatInitializer (pulled in by Compose)
+            can ask a font provider app to download an emoji font at start-up, which is
+            network activity by proxy. The app uses the system's emoji instead.
+            (We redeclare the provider only to reach its entry. Lint can't see the class
+            because androidx.startup is a transitive library, hence MissingClass is ignored.)
+        -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:ignore="MissingClass"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+                tools:node="remove" />
+        </provider>
+    </application>
+
+</manifest>
