@@ -5,10 +5,12 @@ It's written for someone who knows engineering but is new to Kotlin and Android.
 section 1 for the shape of it, then dive into whichever section you need. Section 8
 answers the questions that come up most.
 
-It describes the code **as it is** at the end of milestone 2. Where the code and the
-docs disagree, this follows the code. Every `File.kt:line` link jumps to the line. The
-Android ideas each get a short entry in [learning.md](../learning.md), and the notes below point to
-them.
+It describes the code **as it is** now. Milestone 3 added storage: the players now come
+from the phone, and Confirm saves the game and goes on to record the result. Those parts
+are in [walkthrough 3](03-saving-games.md); this one covers match day from the roster to the confirm step.
+Where the code and the docs disagree, this follows the code. Every `File.kt:line` link
+jumps to the line. The Android ideas each get a short entry in [learning.md](../learning.md), and the
+notes below point to them.
 
 ---
 
@@ -17,8 +19,8 @@ them.
 **What it does.** It runs match day: pick who's playing, get three proposed splits into
 Bibs and Non-bibs, adjust them by hand if you like, and confirm. It follows the original
 web version's match-day flow closely, and every place it deliberately differs says why
-in a code comment. There's no storage yet, so the players are 14 made-up names and
-Confirm doesn't save anything. The app never touches the network.
+in a code comment. Since milestone 3 the players are the group's own, stored on the
+phone, and Confirm saves the game (walkthrough 3). The app never touches the network.
 
 **The flow.**
 
@@ -42,7 +44,7 @@ Confirm doesn't save anything. The app never touches the network.
   CONFIRM  "Confirm teams" ◄─────────────────── Continue → ─────────────┘
   │   GENERATED / EDITED / MANUAL badge; amber button if uneven
   ▼
-  Confirm ✓ → "Saving games arrives in the next milestone" → back to ROSTER
+  Confirm ✓ → game saved → record result → done              (walkthrough 3)
 ```
 
 Five ideas carry the whole thing:
@@ -62,17 +64,17 @@ Five ideas carry the whole thing:
   balancer runs on a background thread, and taps that would clash with it are either
   ignored or cancel it (section 6).
 
-**How we know it's right.** On the laptop, 33 ViewModel tests drive whole match days,
-including the races between taps and a running balancer, and 13 tests pin down the
-editing rules. The engine gained 7 tests for `quality()`, including one that checks it
-ranks splits exactly as `predictDraw` does. On a phone, 5 UI tests tap through the real
-screens the way a person would. A timing test measures the balancer: on a Pixel 9 Pro,
-18 players take a median of about 65 ms, and 20 players between about 180 and 280 ms
-depending on the run. The permission guard (section 2) fails the build on any unlisted
-permission, and its **mutation checks** showed that adding INTERNET through
-`<uses-permission-sdk-23>`, or adding a harmless VIBRATE, each failed the build. As with
-the engine, **every change was reviewed adversarially by two independent AI reviewers
-before it was pushed** ([decisions.md](../decisions.md)).
+**How we know it's right.** On the laptop, the ViewModel tests (92 of them since
+milestone 3) drive whole match days, including the races between taps and a running
+balancer, and 13 tests pin down the editing rules. The engine gained 7 tests for
+`quality()`, including one that checks it ranks splits exactly as `predictDraw` does. On
+a phone, 7 UI tests tap through the real screens the way a person would. A timing test
+measures the balancer: on a Pixel 9 Pro, 18 players take a median of about 65 ms, and 20
+players between about 180 and 280 ms depending on the run. The permission guard (section
+2) fails the build on any unlisted permission, and its **mutation checks** showed that
+adding INTERNET through `<uses-permission-sdk-23>`, or adding a harmless VIBRATE, each
+failed the build. As with the engine, **every change was reviewed adversarially by two
+independent AI reviewers before it was pushed** ([decisions.md](../decisions.md)).
 
 ---
 
@@ -85,20 +87,20 @@ changed in the rebuild except the fonts.
 ### Modules, plugins and versions
 
 [`settings.gradle.kts:19-20`](../../settings.gradle.kts#L19-L20) lists `:engine` (the maths from milestone 1) and `:app`.
-The app depends on the engine ([`build.gradle.kts:38`](../../app/build.gradle.kts#L38)); the engine knows nothing about
+The app depends on the engine ([`build.gradle.kts:51`](../../app/build.gradle.kts#L51)); the engine knows nothing about
 Android. `FAIL_ON_PROJECT_REPOS` ([`settings.gradle.kts:10`](../../settings.gradle.kts#L10)) stops a module adding its
 own download sources. *Android idea here: see [learning.md](../learning.md#an-app-module-and-its-build-file).*
 
 Since Android Gradle Plugin (AGP) 9.0, Kotlin support is built into AGP, so the app
-applies only AGP and the Compose compiler ([`build.gradle.kts:6-11`](../../app/build.gradle.kts#L6-L11)). The Compose
+applies only AGP and the Compose compiler ([`build.gradle.kts:6-19`](../../app/build.gradle.kts#L6-L19)). The Compose
 compiler ships with Kotlin, so its version is tied to Kotlin's
-([`libs.versions.toml:50-51`](../../gradle/libs.versions.toml#L50-L51)). Every version lives in [`libs.versions.toml`](../../gradle/libs.versions.toml). Compose's
+([`libs.versions.toml:68-69`](../../gradle/libs.versions.toml#L68-L69)). Every version lives in [`libs.versions.toml`](../../gradle/libs.versions.toml). Compose's
 many libraries take their versions from one **BOM** ("bill of materials": a list of
 versions known to work together, [`libs.versions.toml:9`](../../gradle/libs.versions.toml#L9)). Espresso is pinned by hand
 because Compose's test library pulls in a version that crashes on newer Android
-([`libs.versions.toml:22-23`](../../gradle/libs.versions.toml#L22-L23)).
+([`libs.versions.toml:33-34`](../../gradle/libs.versions.toml#L33-L34)).
 
-[`build.gradle.kts:15-20`](../../app/build.gradle.kts#L15-L20) sets the SDK levels: `compileSdk` 37 (which Android APIs the
+[`build.gradle.kts:23-28`](../../app/build.gradle.kts#L23-L28) sets the SDK levels: `compileSdk` 37 (which Android APIs the
 code can see), `targetSdk` 37 (which Android behaviour rules the app signs up for) and
 `minSdk` 26 (the oldest Android it installs on, 8.0).
 
@@ -109,21 +111,21 @@ other permission nobody has looked at.
 
 An app lists the permissions it wants in its manifest. Libraries have manifests too, and
 the build **merges** them, so a library can add INTERNET without anyone editing our
-files. **`VerifyPermissions`** ([`build.gradle.kts:82-138`](../../app/build.gradle.kts#L82-L138)) reads the merged result.
-`verify()` ([`build.gradle.kts:97-114`](../../app/build.gradle.kts#L97-L114)) fails with a message naming each unexpected
-permission, or copies the manifest through unchanged ([`build.gradle.kts:113`](../../app/build.gradle.kts#L113)).
-`readPermissions()` ([`build.gradle.kts:120-137`](../../app/build.gradle.kts#L120-L137)) collects both `<uses-permission>` and
+files. **`VerifyPermissions`** ([`build.gradle.kts:108-164`](../../app/build.gradle.kts#L108-L164)) reads the merged result.
+`verify()` ([`build.gradle.kts:123-140`](../../app/build.gradle.kts#L123-L140)) fails with a message naming each unexpected
+permission, or copies the manifest through unchanged ([`build.gradle.kts:139`](../../app/build.gradle.kts#L139)).
+`readPermissions()` ([`build.gradle.kts:146-163`](../../app/build.gradle.kts#L146-L163)) collects both `<uses-permission>` and
 `<uses-permission-sdk-23>`, turns a nameless request into a failure
-([`build.gradle.kts:134-135`](../../app/build.gradle.kts#L134-L135)), and refuses DOCTYPEs in the XML
-([`build.gradle.kts:123-125`](../../app/build.gradle.kts#L123-L125)). `Permission` ([`build.gradle.kts:117`](../../app/build.gradle.kts#L117)) is a name plus
+([`build.gradle.kts:160-161`](../../app/build.gradle.kts#L160-L161)), and refuses DOCTYPEs in the XML
+([`build.gradle.kts:149-151`](../../app/build.gradle.kts#L149-L151)). `Permission` ([`build.gradle.kts:143`](../../app/build.gradle.kts#L143)) is a name plus
 the tag it came from.
 
 - **Why an allowlist?** A blocklist only stops what you thought of. The list has one
-  entry ([`build.gradle.kts:147`](../../app/build.gradle.kts#L147)), `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`, which
+  entry ([`build.gradle.kts:173`](../../app/build.gradle.kts#L173)), `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`, which
   AndroidX adds to keep the app's own internal broadcasts private. It grants no network
   access.
 - **Why inside the manifest pipeline?** The `onVariants` block
-  ([`build.gradle.kts:142-153`](../../app/build.gradle.kts#L142-L153)) registers `verifyAllowedPermissionsDebug` and
+  ([`build.gradle.kts:168-179`](../../app/build.gradle.kts#L168-L179)) registers `verifyAllowedPermissionsDebug` and
   `verifyAllowedPermissionsRelease` as a **transform** of the merged manifest: it goes
   in, gets checked, and comes out. Building an APK, a Play bundle or installing all need
   that manifest, so none can skip the guard. A guard attached only to `./gradlew check`
@@ -136,13 +138,13 @@ the tag it came from.
 
 *Android idea here: see [learning.md](../learning.md#the-manifest-and-permissions).*
 
-- **Backup off** ([`AndroidManifest.xml:21-23`](../../app/src/main/AndroidManifest.xml#L21-L23)): no player data goes to Google's cloud
+- **Backup off** ([`AndroidManifest.xml:22-24`](../../app/src/main/AndroidManifest.xml#L22-L24)): no player data goes to Google's cloud
   backup or phone-to-phone transfer. The app will offer its own export later.
-- **Cleartext off** ([`AndroidManifest.xml:24`](../../app/src/main/AndroidManifest.xml#L24)): unencrypted HTTP is forbidden, a
+- **Cleartext off** ([`AndroidManifest.xml:25`](../../app/src/main/AndroidManifest.xml#L25)): unencrypted HTTP is forbidden, a
   second lock on a door that has no key anyway.
-- **The launcher entry** ([`AndroidManifest.xml:31-38`](../../app/src/main/AndroidManifest.xml#L31-L38)): `exported="true"` lets the
+- **The launcher entry** ([`AndroidManifest.xml:32-39`](../../app/src/main/AndroidManifest.xml#L32-L39)): `exported="true"` lets the
   launcher, which is another app, start us.
-- **The emoji2 initializer, removed** ([`AndroidManifest.xml:47-56`](../../app/src/main/AndroidManifest.xml#L47-L56)): it can ask a
+- **The emoji2 initializer, removed** ([`AndroidManifest.xml:48-57`](../../app/src/main/AndroidManifest.xml#L48-L57)): it can ask a
   font-provider app to download an emoji font, which is network activity by proxy. This
   *is* a `tools:node="remove"`, but for a start-up hook, in plain sight.
 - **Fonts are bundled**, for the same reason. The five font files live in `res/font` and
@@ -262,29 +264,32 @@ screens from top to bottom.
 ### `MainActivity.kt`: the front door
 
 **What it's for:** the one thing Android launches. **`MainActivity`**
-([`MainActivity.kt:13`](../../app/src/main/kotlin/io/github/valnrys/teambayes/MainActivity.kt#L13)) is the app's only Activity. `onCreate`
-([`MainActivity.kt:15-24`](../../app/src/main/kotlin/io/github/valnrys/teambayes/MainActivity.kt#L15-L24)) lets the app draw behind the system bars with
-`enableEdgeToEdge()` ([`MainActivity.kt:18`](../../app/src/main/kotlin/io/github/valnrys/teambayes/MainActivity.kt#L18)), then hands the window to Compose with
-`setContent` ([`MainActivity.kt:19-23`](../../app/src/main/kotlin/io/github/valnrys/teambayes/MainActivity.kt#L19-L23)), wrapping `MatchDayRoute` in the theme.
-*Android idea here: see [learning.md](../learning.md#activity-and-setcontent).*
+([`MainActivity.kt:15`](../../app/src/main/kotlin/io/github/valnrys/teambayes/MainActivity.kt#L15)) is the app's only Activity. `onCreate`
+([`MainActivity.kt:17-27`](../../app/src/main/kotlin/io/github/valnrys/teambayes/MainActivity.kt#L17-L27)) lets the app draw behind the system bars with
+`enableEdgeToEdge()` ([`MainActivity.kt:21`](../../app/src/main/kotlin/io/github/valnrys/teambayes/MainActivity.kt#L21)), then hands the window to Compose with
+`setContent` ([`MainActivity.kt:22-26`](../../app/src/main/kotlin/io/github/valnrys/teambayes/MainActivity.kt#L22-L26)), wrapping `TeamBayesApp` in the theme. Since
+milestone 3 it first fetches the app's shared storage from the `Application`
+([`MainActivity.kt:19`](../../app/src/main/kotlin/io/github/valnrys/teambayes/MainActivity.kt#L19)), and `TeamBayesApp` chooses between first run and match day
+(walkthrough 3). *Android idea here: see [learning.md](../learning.md#activity-and-setcontent).*
 
 ### `SamplePlayers.kt`: made-up players
 
-**What it's for:** a roster worth searching before storage exists.
+**What it's for:** made-up players for tests, previews and first run's debug-only "Load
+sample players" ([`SamplePlayers.kt:17-20`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/SamplePlayers.kt#L17-L20)). Since milestone 3 the app's roster comes
+from storage.
 
 - **`Player`** ([`SamplePlayers.kt:15`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/SamplePlayers.kt#L15)): an id, a display name and the engine's
   `Rating`. The id is never shown, but it matters: the engine sorts by id, so it decides
   how ties break.
-- **`SamplePlayers`** ([`SamplePlayers.kt:24`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/SamplePlayers.kt#L24)) holds 14 invented first names
-  ([`SamplePlayers.kt:26-30`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/SamplePlayers.kt#L26-L30)) and **`all`** ([`SamplePlayers.kt:33`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/SamplePlayers.kt#L33)), the 14 players
-  the app starts with.
-- **`make(count)`** ([`SamplePlayers.kt:42-49`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/SamplePlayers.kt#L42-L49)) builds `count` players, best first. The
+- **`SamplePlayers`** ([`SamplePlayers.kt:25`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/SamplePlayers.kt#L25)) holds 14 invented first names
+  ([`SamplePlayers.kt:27-31`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/SamplePlayers.kt#L27-L31)) and **`all`** ([`SamplePlayers.kt:34`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/SamplePlayers.kt#L34)), all 14 of them.
+- **`make(count)`** ([`SamplePlayers.kt:43-50`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/SamplePlayers.kt#L43-L50)) builds `count` players, best first. The
   means come from the engine's `Prior.fromRankOrder`; every sigma is `SIGMA0`. Past 14,
   names repeat with a number ("Ottoline 2"), which the timing test uses for 18 and 20
   players.
-- **`idFor(number)`** ([`SamplePlayers.kt:55`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/SamplePlayers.kt#L55)) gives `p01`, `p02` and so on. It uses
-  `padStart`, not `String.format`, because `format` can use the phone's language for the
-  digits.
+- **`idFor(number)`** ([`SamplePlayers.kt:56`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/SamplePlayers.kt#L56)), private, gives `p01`, `p02` and so on.
+  It uses `padStart`, not `String.format`, because `format` can use the phone's language
+  for the digits.
 
 ### `TeamEdit.kt`: the hand-editing rules
 
@@ -292,34 +297,34 @@ screens from top to bottom.
 new values out, nothing changed in place, no Android. That makes it the easiest code in
 the app to test. Team A is always the Bibs, team B the Non-bibs.
 
-- **`Selection`** ([`TeamEdit.kt:23-32`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L23-L32)): how a set of teams was made, `GENERATED`,
-  `EDITED` or `MANUAL`. The confirm step shows it as a badge, and once games are saved
-  it will be stored with each one, so we can ask later whether the balancer's teams give
-  closer games than hand-picked ones.
-- **`WorkingCopy`** ([`TeamEdit.kt:44-53`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L44-L53)): teams being edited by hand, kept separate
+- **`Selection`**: how a set of teams was made, `GENERATED`, `EDITED` or `MANUAL`. Since
+  milestone 3 it lives in the storage layer ([`Games.kt:15-24`](../../app/src/main/kotlin/io/github/valnrys/teambayes/data/Games.kt#L15-L24)), so the badge on the
+  confirm step is exactly what's saved with the game, and one day we can ask whether the
+  balancer's teams give closer games than hand-picked ones.
+- **`WorkingCopy`** ([`TeamEdit.kt:31-40`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L31-L40)): teams being edited by hand, kept separate
   so the balancer's proposals stay as they were. It holds a mode, both teams and a pool.
   Its `init` refuses `GENERATED`, since a working copy is by definition edited or
   manual.
-- **`fromSplit`** ([`TeamEdit.kt:56-57`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L56-L57)) starts editing a proposal (empty pool).
-  **`fromRoster`** ([`TeamEdit.kt:60-61`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L60-L61)) starts the manual board with everyone in the
+- **`fromSplit`** ([`TeamEdit.kt:43-44`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L43-L44)) starts editing a proposal (empty pool).
+  **`fromRoster`** ([`TeamEdit.kt:47-48`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L47-L48)) starts the manual board with everyone in the
   pool, in tick order.
-- **`move(playerId)`** ([`TeamEdit.kt:72-80`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L72-L80)) is the only way teams change by hand. On
+- **`move(playerId)`** ([`TeamEdit.kt:59-67`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L59-L67)) is the only way teams change by hand. On
   a proposal a player swaps sides; on the manual board they step round Pool → Bibs →
   Non-bibs → Pool. They join the end of their new list. An unknown id gives back the
   very same object, which the ViewModel uses to spot a move that did nothing. *Kotlin
   idea: `when (playerId) { in teamA -> ... }` branches on list membership.*
-- **`nextPlace`** ([`TeamEdit.kt:86-91`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L86-L91)) says where a tap would send someone, for
-  TalkBack's "move to Non-bibs". **`Place`** ([`TeamEdit.kt:94`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L94)) is the three board
+- **`nextPlace`** ([`TeamEdit.kt:73-78`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L73-L78)) says where a tap would send someone, for
+  TalkBack's "move to Non-bibs". **`Place`** ([`TeamEdit.kt:81`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L81)) is the three board
   positions.
-- **`isComplete()`** ([`TeamEdit.kt:97`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L97)): nobody in the pool and someone on each team.
-- **`SizeGap`** and **`sizeWarning`** ([`TeamEdit.kt:105-109`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L105-L109)): returns "6 v 4" when
-  the teams differ by more than one, otherwise `null`. It's advisory: it turns the
-  confirm button amber but never blocks it.
-- **`lockAfterTap`** ([`TeamEdit.kt:119-123`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L119-L123)): tapping a lock cycles unlocked → locked
+- **`isComplete()`** ([`TeamEdit.kt:84`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L84)): nobody in the pool and someone on each team.
+- **`SizeGap`** and **`sizeWarning`** ([`TeamEdit.kt:92-96`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L92-L96)): returns "6 v 4" when the
+  teams differ by more than one, otherwise `null`. It's advisory: it turns the confirm
+  button amber but never blocks it.
+- **`lockAfterTap`** ([`TeamEdit.kt:106-110`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L106-L110)): tapping a lock cycles unlocked → locked
   to this side → unlocked. If the player was locked to the *other* side (from another
   card), the tap moves the lock here.
-- **`Meter`** ([`TeamEdit.kt:133`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L133)) is the model's view of one pair of teams: `quality`
-  and the Bibs' win chance. **`meterFor`** ([`TeamEdit.kt:143-148`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L143-L148)) works it out with
+- **`Meter`** ([`TeamEdit.kt:120`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L120)) is the model's view of one pair of teams: `quality`
+  and the Bibs' win chance. **`meterFor`** ([`TeamEdit.kt:130-135`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/TeamEdit.kt#L130-L135)) works it out with
   the engine, or returns `null` while a side is empty. It's a handful of sums, cheap
   enough to run straight after every tap on the main thread.
 
@@ -330,125 +335,126 @@ does, and running the balancer without freezing anything.
 
 #### Constants and small types
 
-- **`OPTIONS = 3`** ([`MatchDayViewModel.kt:23-24`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L23-L24)): how many proposals to show, as the
-  original did. **`MAX_NAME_LENGTH = 60`** ([`MatchDayViewModel.kt:26-27`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L26-L27)) caps a new
-  name. **`MIN_PLAYERS_MANUAL = 2`** ([`MatchDayViewModel.kt:29-30`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L29-L30)): one a side.
-- **`Step`** ([`MatchDayViewModel.kt:38-50`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L38-L50)): `ROSTER`, `GENERATE`, `MANUAL`,
-  `CONFIRM`. The original went on to record the result; those steps arrive with storage.
-- **`SplitOption`** ([`MatchDayViewModel.kt:59`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L59)): one proposal, its teams in name order
-  plus its `Meter`. **`ChosenTeams`** ([`MatchDayViewModel.kt:62`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L62)): the teams on the
+- **`OPTIONS = 3`** ([`MatchDayViewModel.kt:53-54`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L53-L54)): how many proposals to show, as the
+  original did. **`MAX_NAME_LENGTH = 60`** ([`MatchDayViewModel.kt:56-57`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L56-L57)) caps a new
+  name. **`MIN_PLAYERS_MANUAL = 2`** ([`MatchDayViewModel.kt:59-60`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L59-L60)): one a side.
+- **`Step`** ([`MatchDayViewModel.kt:66-84`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L66-L84)): `ROSTER`, `GENERATE`, `MANUAL`,
+  `CONFIRM`, then `RECORD` and `DONE`, which milestone 3 added (walkthrough 3).
+- **`SplitOption`** ([`MatchDayViewModel.kt:93`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L93)): one proposal, its teams in name order
+  plus its `Meter`. **`ChosenTeams`** ([`MatchDayViewModel.kt:96`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L96)): the teams on the
   confirm step and how they were made.
-- **`DiscardAction`** ([`MatchDayViewModel.kt:65-71`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L65-L71)): what "Discard" in the dialog
+- **`DiscardAction`** ([`MatchDayViewModel.kt:99-105`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L99-L105)): what "Discard" in the dialog
   will do, either show another proposal or re-generate. The dialog remembers the action,
   so one dialog serves both.
 
 #### `MatchDayUiState`: everything on screen
 
-**`MatchDayUiState`** ([`MatchDayViewModel.kt:99-117`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L99-L117)) is deliberately flat, one field
+**`MatchDayUiState`** ([`MatchDayViewModel.kt:215-245`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L215-L245)) is deliberately flat, one field
 per thing the organiser can see or change, in the same shape as the original web
-version's screen state. Fields for later steps sit unused until then. The ones worth
-knowing: `selectedIds` keeps tick order; `generating` is true while the balancer runs;
-`problem` and `notice` are string resource ids; `workingCopy` is `null` until someone
-moves a player; `liveMeter` is the meter for the working copy; `discardPrompt` is set
-while the dialog is open.
+version's screen state. Fields for later steps sit unused until then. Milestone 3 added
+fields for loading, the placement sheet, the date and the stored game (walkthrough 3).
+The ones that matter here: `selectedIds` keeps tick order; `generating` is true while
+the balancer runs; `problem` and `notice` are string resource ids; `workingCopy` is
+`null` until someone moves a player; `liveMeter` is the meter for the working copy;
+`discardPrompt` is set while the dialog is open.
 
 The derived values:
 
 - **`namesById`**, **`ratingsById`**, **`visiblePlayers`**
-  ([`MatchDayViewModel.kt:119-127`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L119-L127)) are worked out on first use with `by lazy`, so a
+  ([`MatchDayViewModel.kt:247-258`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L247-L258)) are worked out on first use with `by lazy`, so a
   state that never needs them never builds them. `visiblePlayers` filters by the search
   text, ignoring case.
-- **`canMakeTeams`** ([`MatchDayViewModel.kt:135`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L135)): at least two ticked. **Both**
+- **`canMakeTeams`** ([`MatchDayViewModel.kt:274`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L274)): at least two ticked. **Both**
   roster buttons unlock at two, as in the original. The balancer needs four, so with two
   or three, Generate shows the engine's own reason ("needs at least 4 players. With
   fewer, make teams manually") rather than sitting greyed out with no explanation.
-- **`canContinue`** ([`MatchDayViewModel.kt:142-145`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L142-L145)): on the generate or manual step,
+- **`canContinue`** ([`MatchDayViewModel.kt:281-284`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L281-L284)): on the generate or manual step,
   not generating, and either the working copy is complete or there's a proposal to take.
 
 #### The class
 
-**`MatchDayViewModel`** ([`MatchDayViewModel.kt:160-163`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L160-L163)) takes the players (the sample
-players by default) and where to run the balancer (`Dispatchers.Default` by default;
-tests swap in one they control). It implements `MatchDayActions`, the interface the
-screen calls. The state starts with the roster sorted A to Z
-([`MatchDayViewModel.kt:165`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L165)); `state` ([`MatchDayViewModel.kt:168`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L168)) is the read-only
-view. `generateJob` ([`MatchDayViewModel.kt:171`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L171)) remembers the run in progress so it
-can be cancelled. *Android idea here: see [learning.md](../learning.md#viewmodel-and-stateflow) and [learning.md](../learning.md#a-step-machine-in-one-stateflow).*
+**`MatchDayViewModel`** ([`MatchDayViewModel.kt:340-347`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L340-L347)) takes the three repositories,
+a `SavedStateHandle`, where to run the balancer (`Dispatchers.Default` by default; tests
+swap in one they control) and a clock. Walkthrough 3 covers the storage side. It
+implements `MatchDayActions`, the interface the screen calls. The state starts empty and
+loading ([`MatchDayViewModel.kt:352`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L352)) until the stored players arrive; `state`
+([`MatchDayViewModel.kt:355`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L355)) is the read-only view. `generateJob`
+([`MatchDayViewModel.kt:371`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L371)) remembers the run in progress so it can be cancelled.
+*Android idea here: see [learning.md](../learning.md#viewmodel-and-stateflow) and [learning.md](../learning.md#a-step-machine-in-one-stateflow).*
 
 #### Roster actions
 
-- **`toggleSelected`** ([`MatchDayViewModel.kt:180-189`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L180-L189)) ticks or unticks. It cancels
+- **`toggleSelected`** ([`MatchDayViewModel.kt:502-511`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L502-L511)) ticks or unticks. It cancels
   any balancer run, because the roster just changed. Unticking also drops the player's
   lock, so it can't quietly return if they're ticked again.
-- **`setSearch`** ([`MatchDayViewModel.kt:192`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L192)) and **`setNewPlayerName`**
-  ([`MatchDayViewModel.kt:195-196`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L195-L196)) store the typed text; the name is cut to 60
+- **`setSearch`** ([`MatchDayViewModel.kt:514`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L514)) and **`setNewPlayerName`**
+  ([`MatchDayViewModel.kt:517-518`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L517-L518)) store the typed text; the name is cut to 60
   characters and any duplicate message clears.
-- **`addPlayer`** ([`MatchDayViewModel.kt:207-232`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L207-L232)) trims the name, ignores a blank
-  one, and refuses one already on the roster, ignoring case, so two "Sam"s can't be
-  confused on the pitch. A new player starts as an average unknown (`MU0` ± `SIGMA0`),
-  is ticked, and lives only in memory. **Surprise:** the id is the first *unused* one
-  after the roster's size ([`MatchDayViewModel.kt:216-221`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L216-L221)), not simply size + 1, so an
-  id can never repeat once players can be removed. It also cancels a run in progress,
-  which wouldn't include the newcomer.
-- **`generate`** ([`MatchDayViewModel.kt:235`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L235)) runs the balancer.
-  **`makeTeamsManually`** ([`MatchDayViewModel.kt:238-253`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L238-L253)) opens the board with
+- **`addPlayer`** ([`MatchDayViewModel.kt:532-543`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L532-L543)) normalises the name, ignores a
+  blank one, and refuses one already taken, ignoring case, so two "Sam"s can't be
+  confused on the pitch. Since milestone 3 it doesn't add anyone straight away: it opens
+  "Where do they fit?", so the newcomer is placed in the ranking and saved with a
+  sensible starting rating (walkthrough 3).
+- **`generate`** ([`MatchDayViewModel.kt:609`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L609)) runs the balancer.
+  **`makeTeamsManually`** ([`MatchDayViewModel.kt:612-627`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L612-L627)) opens the board with
   everyone in the pool and drops any old proposals.
 
 #### Pick-a-split actions
 
-- **`selectSplit(index)`** ([`MatchDayViewModel.kt:258-266`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L258-L266)) chooses a card. With hand
+- **`selectSplit(index)`** ([`MatchDayViewModel.kt:632-640`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L632-L640)) chooses a card. With hand
   edits it asks first, by setting `discardPrompt`. It ignores taps while generating.
-- **`regenerate`** ([`MatchDayViewModel.kt:269-277`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L269-L277)) runs the balancer again with the
+- **`regenerate`** ([`MatchDayViewModel.kt:643-651`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L643-L651)) runs the balancer again with the
   current locks, asking first if there are edits.
-- **`confirmDiscard`** ([`MatchDayViewModel.kt:280-287`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L280-L287)) drops the edits and does the
-  remembered action. **`dismissDiscard`** ([`MatchDayViewModel.kt:290`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L290)) just closes the
+- **`confirmDiscard`** ([`MatchDayViewModel.kt:654-661`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L654-L661)) drops the edits and does the
+  remembered action. **`dismissDiscard`** ([`MatchDayViewModel.kt:664`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L664)) just closes the
   dialog.
-- **`movePlayer`** ([`MatchDayViewModel.kt:307-322`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L307-L322)) moves one player. The first move
+- **`movePlayer`** ([`MatchDayViewModel.kt:681-696`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L681-L696)) moves one player. The first move
   on a proposal turns it into an `EDITED` working copy, and the meter is recomputed
   straight away. A move that changes nothing is ignored, so there's no EDITED badge for
-  nothing ([`MatchDayViewModel.kt:315`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L315)). **Moving also clears that player's lock**
-  ([`MatchDayViewModel.kt:319`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L319)). That's a deliberate divergence from the original,
-  explained in the KDoc ([`MatchDayViewModel.kt:299-303`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L299-L303)): a lock means "keep them on
+  nothing ([`MatchDayViewModel.kt:689`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L689)). **Moving also clears that player's lock**
+  ([`MatchDayViewModel.kt:693`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L693)). That's a deliberate divergence from the original,
+  explained in the KDoc ([`MatchDayViewModel.kt:673-677`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L673-L677)): a lock means "keep them on
   this side", so after a move it would show a lock that no longer matches where they
   are.
-- **`toggleLock`** ([`MatchDayViewModel.kt:325-327`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L325-L327)) applies `lockAfterTap`, ignored
+- **`toggleLock`** ([`MatchDayViewModel.kt:699-701`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L699-L701)) applies `lockAfterTap`, ignored
   while generating.
-- **`continueToConfirm`** ([`MatchDayViewModel.kt:330-342`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L330-L342)) takes the working copy if
+- **`continueToConfirm`** ([`MatchDayViewModel.kt:704-716`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L704-L716)) takes the working copy if
   there is one, otherwise the chosen proposal, to the confirm step. It closes any open
   dialog.
 
 #### Confirm and back
 
-- **`confirm`** ([`MatchDayViewModel.kt:353-365`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L353-L365)) doesn't save yet. It returns to the
-  roster with a notice ("Saving games arrives in the next milestone"), keeps the ticks
-  so you don't re-tick everyone, and clears locks, since the roster has no lock controls
-  and a hidden lock would act unseen. **`noticeShown`** ([`MatchDayViewModel.kt:368`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L368))
-  clears the notice once the snackbar has shown it.
-- **`back`** ([`MatchDayViewModel.kt:377-398`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L377-L398)) goes one step back. From the generate or
+- **`confirm`** ([`MatchDayViewModel.kt:743-789`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L743-L789)) saves the teams as the pending game
+  and goes straight to recording the result (walkthrough 3). The proposals, edits and
+  locks are done with, so they're dropped; the ticks stay. **`noticeShown`**
+  ([`MatchDayViewModel.kt:792`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L792)) clears the notice once the snackbar has shown it.
+- **`back`** ([`MatchDayViewModel.kt:807-832`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L807-L832)) goes one step back. From the generate or
   manual step it drops edits, proposals and locks, as the original does. From confirm it
-  keeps them and returns to the board you came from, manual or generate.
+  keeps them and returns to the board you came from, manual or generate. From the record
+  step it goes to the roster (walkthrough 3).
 
 #### The balancer
 
-**`runBalancer`** ([`MatchDayViewModel.kt:409-447`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L409-L447)) builds the roster from the ticked
-players and filters the locks to people who are playing ([`MatchDayViewModel.kt:416`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L416)),
+**`runBalancer`** ([`MatchDayViewModel.kt:1106-1144`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L1106-L1144)) builds the roster from the ticked
+players and filters the locks to people who are playing ([`MatchDayViewModel.kt:1113`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L1113)),
 a second line of defence. It cancels any earlier run, sets `generating`, and launches a
 coroutine that runs `Balancer.balance(..., k = 3)` on the background dispatcher
-([`MatchDayViewModel.kt:422-423`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L422-L423)). *Android idea here: see [learning.md](../learning.md#viewmodelscope-and-dispatchersdefault).*
+([`MatchDayViewModel.kt:1119-1120`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L1119-L1120)). *Android idea here: see [learning.md](../learning.md#viewmodelscope-and-dispatchersdefault).*
 
 When it finishes, an `Impossible` sets `problem` and leaves everything else alone, so
 the old proposals stay. A `Splits` result moves to the generate step with fresh
 proposals and no edits. **Surprise:** each team is re-sorted by name
-([`MatchDayViewModel.kt:431-434`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L431-L434)). The engine lists players by id, which for the sample
-players is best first, and name order gives nothing away on a shared screen.
+([`MatchDayViewModel.kt:1128-1131`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L1128-L1131)). The engine lists players by id, which means
+nothing to a person; name order is easy to scan and gives nothing away on a shared
+screen.
 
-**`cancelGenerating`** ([`MatchDayViewModel.kt:449-453`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L449-L453)) cancels the job and clears
+**`cancelGenerating`** ([`MatchDayViewModel.kt:1146-1150`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L1146-L1150)) cancels the job and clears
 `generating`. The balancer's maths never checks for cancellation, so the CPU work runs
 on, but a cancelled coroutine can't publish its result: when `withContext` returns to
 it, it throws instead.
 
-**`Reason.message()`** ([`MatchDayViewModel.kt:457-465`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L457-L465)) maps each engine refusal to a
-sentence. A duplicate id or a lock on an unknown player can't come from these screens,
+**`Reason.message()`** ([`MatchDayViewModel.kt:1211-1219`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModel.kt#L1211-L1219)) maps each engine refusal to
+a sentence. A duplicate id or a lock on an unknown player can't come from these screens,
 so they share "Something went wrong".
 
 ### `MatchDayScreen.kt`: the frame
@@ -456,68 +462,72 @@ so they share "Something went wrong".
 **What it's for:** picking which step to draw, and owning the things that sit on top of
 every step.
 
-- **`MatchDayActions`** ([`MatchDayScreen.kt:33-50`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt#L33-L50)) is an interface with one function
+- **`MatchDayActions`** ([`MatchDayScreen.kt:36-66`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt#L36-L66)) is an interface with one function
   per tap. Passing one interface, rather than a dozen lambdas, keeps each step's
-  signature short. **`NoActions`** ([`MatchDayScreen.kt:53-70`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt#L53-L70)) does nothing, for
+  signature short. **`NoActions`** ([`MatchDayScreen.kt:69-99`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt#L69-L99)) does nothing, for
   previews.
-- **`MatchDayRoute`** ([`MatchDayScreen.kt:78-83`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt#L78-L83)) is the only function that knows
-  about the ViewModel. It collects the state, stopping while the app is in the
+- **`MatchDayRoute`** ([`MatchDayScreen.kt:111-119`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt#L111-L119)) is the only function that knows
+  about the ViewModel. Since milestone 3 it takes the app's container and builds the
+  ViewModel through a factory. It collects the state, stopping while the app is in the
   background, and passes the state and the ViewModel (as `MatchDayActions`) down.
   *Android idea here: see [learning.md](../learning.md#state-hoisting).*
-- **`MatchDayScreen`** ([`MatchDayScreen.kt:92-126`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt#L92-L126)) is stateless. `BackHandler`
-  ([`MatchDayScreen.kt:96`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt#L96)) makes the phone's back gesture call `back()` on every step
+- **`MatchDayScreen`** ([`MatchDayScreen.kt:129-179`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt#L129-L179)) is stateless. `BackHandler`
+  ([`MatchDayScreen.kt:133`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt#L133)) makes the phone's back gesture call `back()` on every step
   except the roster, where back leaves the app as usual. A `LaunchedEffect` keyed on the
-  notice ([`MatchDayScreen.kt:98-106`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt#L98-L106)) shows each new notice in a snackbar, then
+  notice ([`MatchDayScreen.kt:135-143`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt#L135-L143)) shows each new notice in a snackbar, then
   reports it shown. The `Scaffold` measures `safeDrawing` insets (status bar, navigation
   bar, camera cutout and keyboard), and the `when` picks the step
-  ([`MatchDayScreen.kt:110-121`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt#L110-L121)). The dialog sits on top when `discardPrompt` is set
-  ([`MatchDayScreen.kt:123-125`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt#L123-L125)). *Android idea here: see [learning.md](../learning.md#composable-functions-and-recomposition).*
-- **`DiscardDialog`** ([`MatchDayScreen.kt:134-148`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt#L134-L148)) is a standard Material
-  `AlertDialog` with Cancel and a red Discard. Being standard, TalkBack announces it,
-  and back or tapping outside counts as Cancel.
+  ([`MatchDayScreen.kt:147-161`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt#L147-L161)). Until the stored players load, it draws nothing
+  ([`MatchDayScreen.kt:152`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt#L152)). The "Where do they fit?" sheet and two dialogs, "Discard
+  your edits?" and "Discard this unfinished match day?", sit on top when needed
+  ([`MatchDayScreen.kt:163-178`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt#L163-L178)). *Android idea here: see [learning.md](../learning.md#composable-functions-and-recomposition).*
+- **`DiscardDialog`** ([`MatchDayScreen.kt:188-202`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreen.kt#L188-L202)) is a standard Material
+  `AlertDialog` with a question, Cancel and a red Discard. Being standard, TalkBack
+  announces it, and back or tapping outside counts as Cancel.
 
 ### `RosterStep.kt`: "Who's playing?"
 
 **What it's for:** ticking players, searching, adding someone new, then choosing how to
 make teams.
 
-**`RosterStep`** ([`RosterStep.kt:56-125`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L56-L125)) puts everything except the buttons in one
-scrolling `LazyColumn` ([`RosterStep.kt:62-101`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L62-L101)), a list that only builds the rows on
+**`RosterStep`** ([`RosterStep.kt:61-133`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L61-L133)) puts everything except the buttons in one
+scrolling `LazyColumn` ([`RosterStep.kt:67-109`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L67-L109)), a list that only builds the rows on
 screen: the title and count, the search field, the player rows and, last, "+ New
 player", which sits under the list as in the original. Scrolling it all as one means
 even a short screen, such as landscape at a large font size, can reach every part. The
-footer ([`RosterStep.kt:103-123`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L103-L123)) holds only any problem and the two buttons, "Make
+footer ([`RosterStep.kt:111-131`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L111-L131)) holds only any problem and the two buttons, "Make
 teams manually" and "Generate teams (n) →" (which reads "Generating…" while it runs), so
 they're always in reach except while the keyboard is open. Both buttons need two ticks.
 
-- **The search field** ([`RosterStep.kt:70-84`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L70-L84)) uses a real floating label rather than
+- **The search field** ([`RosterStep.kt:78-92`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L78-L92)) uses a real floating label rather than
   a placeholder, so it stays visible while you type and TalkBack reads it as the field's
   name. The list filters as you type, so the keyboard's Search key only has to close the
-  keyboard, which brings the buttons back ([`RosterStep.kt:78-80`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L78-L80)).
-- **The rows** use `key = { it.id }` ([`RosterStep.kt:86-94`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L86-L94)), so a tick stays on the
+  keyboard, which brings the buttons back ([`RosterStep.kt:86-88`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L86-L88)).
+- **The rows** use `key = { it.id }` ([`RosterStep.kt:94-102`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L94-L102)), so a tick stays on the
   right person while the search narrows the list. With no matches, a hint suggests
-  adding someone ([`RosterStep.kt:95-97`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L95-L97)). The list's test tag, **`ROSTER_LIST_TAG`**
-  ([`RosterStep.kt:43`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L43)), lets the UI tests find it and scroll it.
-- **"+ New player"** is the list's last item ([`RosterStep.kt:98-100`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L98-L100)), so you scroll
+  adding someone ([`RosterStep.kt:103-105`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L103-L105)). The list's test tag, **`ROSTER_LIST_TAG`**
+  ([`RosterStep.kt:48`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L48)), lets the UI tests find it and scroll it.
+- **"+ New player"** is the list's last item ([`RosterStep.kt:106-108`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L106-L108)), so you scroll
   to the bottom of the roster to add someone. **Surprise:** the header, search field and
   new-player field each have a fixed item key, like the rows. Without one, an item is
   identified by its position, so as a search or an Add changed the rows above, the field
   would become a "different" item, lose focus, and close the keyboard mid-typing.
 
-**`RosterHeader`** ([`RosterStep.kt:128-153`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L128-L153)) is the title plus an "n selected" pill.
-The pill is a polite **live region** ([`RosterStep.kt:148-149`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L148-L149)): TalkBack reads the new
+**`RosterHeader`** ([`RosterStep.kt:172-197`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L172-L197)) is the title plus an "n selected" pill.
+The pill is a polite **live region** ([`RosterStep.kt:192-193`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L192-L193)): TalkBack reads the new
 count after each tick, once it has finished reading the row.
 
-**`PlayerRow`** ([`RosterStep.kt:162-174`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L162-L174)) makes the whole 52 dp row one target.
-`toggleable(role = Role.Checkbox)` ([`RosterStep.kt:168`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L168)) turns the row into a single
+**`PlayerRow`** ([`RosterStep.kt:206-218`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L206-L218)) makes the whole 52 dp row one target.
+`toggleable(role = Role.Checkbox)` ([`RosterStep.kt:212`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L212)) turns the row into a single
 checkbox for TalkBack, and the `Checkbox` inside only draws, so one tap is never handled
-twice. **`RosterRowHeight`** ([`RosterStep.kt:40`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L40)) is 52 dp, a little taller than the
+twice. **`RosterRowHeight`** ([`RosterStep.kt:45`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L45)) is 52 dp, a little taller than the
 48 dp minimum, as in the original. *Android idea here: see [learning.md](../learning.md#semantics-for-talkback).*
 
-**`NewPlayerField`** ([`RosterStep.kt:181-213`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L181-L213)) is a text field with an Add button. The
-keyboard capitalises words and its Done key adds ([`RosterStep.kt:198-202`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L198-L202)). A
-duplicate marks the field as an error with "Player 'Sam' already exists" underneath
-([`RosterStep.kt:196-197`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L196-L197)), which TalkBack reads with the field. Add is disabled while
+**`NewPlayerField`** ([`RosterStep.kt:226-263`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L226-L263)) is a text field with an Add button. The
+keyboard capitalises words, and its Done key opens "Where do they fit?", or just closes
+the keyboard when the field is blank ([`RosterStep.kt:244-252`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L244-L252)). A duplicate marks the
+field as an error with "Player 'Sam' already exists" underneath
+([`RosterStep.kt:242-243`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/RosterStep.kt#L242-L243)), which TalkBack reads with the field. Add is disabled while
 the field is blank. When the keyboard opens for it, the footer hides and the list ends
 just above the keyboard, so the field stays in view as you type.
 
@@ -526,33 +536,33 @@ just above the keyboard, so the field stays in view as you type.
 **What it's for:** showing the three proposals, letting you choose one, adjust it, lock
 players and re-generate.
 
-**`PickSplitStep`** ([`PickSplitStep.kt:48-66`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L48-L66)) puts the cards in the scrolling body
-and pins a footer ([`PickSplitStep.kt:54-64`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L54-L64)): the meter line, "↻ Re-generate", and
+**`PickSplitStep`** ([`PickSplitStep.kt:49-67`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L49-L67)) puts the cards in the scrolling body
+and pins a footer ([`PickSplitStep.kt:55-65`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L55-L65)): the meter line, "↻ Re-generate", and
 Back / Continue. The meter line is always there, blank until the first move, so the
 footer doesn't jump when the numbers arrive. Pinning the meter and Re-generate goes
 slightly beyond the original, which pinned only its roster buttons. It's deliberate: you
 can move a chip and watch the numbers change without scrolling down to find them
-([`PickSplitStep.kt:45-46`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L45-L46)).
+([`PickSplitStep.kt:46-47`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L46-L47)).
 
-**`PickSplitBody`** ([`PickSplitStep.kt:69-108`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L69-L108)) is the scrolling part: the heading, a
-note when the search was sampled ([`PickSplitStep.kt:79`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L79)), a hint, any problem, then
+**`PickSplitBody`** ([`PickSplitStep.kt:70-109`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L70-L109)) is the scrolling part: the heading, a
+note when the search was sampled ([`PickSplitStep.kt:80`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L80)), a hint, any problem, then
 the cards. The cards sit in a column marked `selectableGroup()`
-([`PickSplitStep.kt:84-85`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L84-L85)), so TalkBack treats them as one set of choices ("1 of 3").
+([`PickSplitStep.kt:85-86`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L85-L86)), so TalkBack treats them as one set of choices ("1 of 3").
 Only the chosen card shows hand edits; the others stay as proposed
-([`PickSplitStep.kt:88-89`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L88-L89)). While the balancer runs, nothing on the cards responds
-([`PickSplitStep.kt:100-102`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L100-L102)). *Android idea here: see [learning.md](../learning.md#selectablegroup-and-radio-semantics).*
+([`PickSplitStep.kt:89-90`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L89-L90)). While the balancer runs, nothing on the cards responds
+([`PickSplitStep.kt:101-103`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L101-L103)). *Android idea here: see [learning.md](../learning.md#selectablegroup-and-radio-semantics).*
 
-**`SplitCard`** ([`PickSplitStep.kt:117-188`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L117-L188)) is one proposal. It's `selectable` with
-`Role.RadioButton` ([`PickSplitStep.kt:141-146`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L141-L146)), so the three cards behave like one
+**`SplitCard`** ([`PickSplitStep.kt:118-189`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L118-L189)) is one proposal. It's `selectable` with
+`Role.RadioButton` ([`PickSplitStep.kt:142-147`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L142-L147)), so the three cards behave like one
 radio group, and the chosen one gets a 2 dp accent border. Inside: "Option 1", the amber
 EDITED badge if edited, and "Quality 83%" in DM Mono, or "Quality —" while a side is
 empty. A thin bar shows the same number but is hidden from TalkBack
-([`PickSplitStep.kt:168-178`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L168-L178)), so it isn't read twice. **Win chances always add to
-100** ([`PickSplitStep.kt:179-184`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L179-L184)): it rounds the Bibs' chance and gives the Non-bibs
+([`PickSplitStep.kt:169-179`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L169-L179)), so it isn't read twice. **Win chances always add to
+100** ([`PickSplitStep.kt:180-185`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L180-L185)): it rounds the Bibs' chance and gives the Non-bibs
 the rest. The original rounded each side, which could show 51% and 50%.
 
-**`SideColumn`** ([`PickSplitStep.kt:191-218`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L191-L218)) is one team: "BIBS · 52%", then a chip
-per player. On the chosen card a chip moves its player ([`PickSplitStep.kt:211-212`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L211-L212));
+**`SideColumn`** ([`PickSplitStep.kt:192-219`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L192-L219)) is one team: "BIBS · 52%", then a chip
+per player. On the chosen card a chip moves its player ([`PickSplitStep.kt:212-213`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/PickSplitStep.kt#L212-L213));
 on the others, `onMove` is `null`, so a tap falls through to the card and chooses it.
 Every chip on every card has a lock.
 
@@ -570,14 +580,14 @@ says.
 ### `ConfirmStep.kt`: "Confirm teams"
 
 **What it's for:** a last look before the game would be saved. **`ConfirmStep`**
-([`ConfirmStep.kt:34-58`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt#L34-L58)) pins Back and Confirm in its footer. If the teams differ by
+([`ConfirmStep.kt:54-85`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt#L54-L85)) pins Back and Confirm in its footer. If the teams differ by
 more than one, the button turns amber and reads "Teams uneven (6 v 4) — sure?"
-([`ConfirmStep.kt:44-54`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt#L44-L54)). It's a nudge, not a lock: tapping it still confirms.
-**`ConfirmSummary`** ([`ConfirmStep.kt:61-88`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt#L61-L88)) is the scrolling part: the heading with
-a GENERATED, EDITED or MANUAL badge ([`ConfirmStep.kt:75-76`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt#L75-L76)) and the two teams as
-plain chips. **`Selection.label()`** ([`ConfirmStep.kt:91-95`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt#L91-L95)) picks the badge word.
-There's no date field yet, a documented divergence, because nothing is saved and a date
-would be thrown away.
+([`ConfirmStep.kt:69-81`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt#L69-L81)). It's a nudge, not a lock: tapping it still confirms.
+**`ConfirmSummary`** ([`ConfirmStep.kt:88-117`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt#L88-L117)) is the scrolling part: the heading with
+a GENERATED, EDITED or MANUAL badge ([`ConfirmStep.kt:102-103`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt#L102-L103)) and the two teams as
+plain chips. **`Selection.label()`** ([`ConfirmStep.kt:189-193`](../../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt#L189-L193)) picks the badge word.
+Since milestone 3 the step also shows the date and Confirm saves the game; walkthrough 3
+covers both.
 
 ### `TeamComponents.kt`: the shared pieces
 
@@ -684,7 +694,8 @@ front-door version that works out beta for you.
 ## 6. The tests
 
 Run them with `./gradlew test` (laptop) and `./gradlew :app:connectedDebugAndroidTest`
-(needs a phone). *Android idea here: see [learning.md](../learning.md#jvm-tests-vs-instrumented-tests).*
+(needs an emulator or a spare phone, never one holding real games; see walkthrough 3).
+*Android idea here: see [learning.md](../learning.md#jvm-tests-vs-instrumented-tests).*
 
 **`QualityTest.kt`** (engine, 7 tests): an even split scores exactly 1, including uneven
 team sizes ([`QualityTest.kt:13-41`](../../engine/src/test/kotlin/io/github/valnrys/teambayes/engine/QualityTest.kt#L13-L41)); quality equals an oracle built only from
@@ -693,19 +704,21 @@ team sizes ([`QualityTest.kt:13-41`](../../engine/src/test/kotlin/io/github/valn
 every split of a 6-player roster ranks identically by `quality` and by `predictDraw`
 ([`QualityTest.kt:62-76`](../../engine/src/test/kotlin/io/github/valnrys/teambayes/engine/QualityTest.kt#L62-L76)); empty teams are refused.
 
-**`TeamEditTest.kt`** (13 tests) pins down the pure rules ([`TeamEditTest.kt:13-142`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/TeamEditTest.kt#L13-L142)):
+**`TeamEditTest.kt`** (13 tests) pins down the pure rules ([`TeamEditTest.kt:14-143`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/TeamEditTest.kt#L14-L143)):
 swapping on a proposal, the manual cycle, that `move` never changes its input and
 returns the same object for an unknown id, `nextPlace`, `isComplete`, the size warning
 only above a gap of one, both lock rules, and the meter on empty, level and lopsided
 teams.
 
-**`MatchDayViewModelTest.kt`** (33 tests) drives whole match days on the laptop. **The
-setup** ([`MatchDayViewModelTest.kt:36-49`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModelTest.kt#L36-L49)) gives the ViewModel an unconfined "main"
+**`MatchDayViewModelTest.kt`** (92 tests since milestone 3) drives whole match days on
+the laptop, on in-memory fake repositories. **The setup**
+([`MatchDayViewModelTest.kt:60-73`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModelTest.kt#L60-L73)) gives the ViewModel an unconfined "main"
 dispatcher, so its coroutine starts at once, and a standard "balancer" dispatcher that
 runs nothing until the test calls `advanceUntilIdle()`. That freezes the ViewModel
-mid-generate, where a test can poke at it. The tests cover the roster (order, search,
-adding, duplicates, the 60-character cap), generating, editing, the discard dialog,
-locks, the manual board, confirm and back.
+mid-generate, where a test can poke at it. The tests here cover the roster (order,
+search, adding, duplicates, the 60-character cap), generating, editing, the discard
+dialog, locks, the manual board, confirm and back; walkthrough 3 covers the ones for
+saving, recording and resuming.
 
 **The race tests** check what happens when someone taps while the balancer runs. The
 rule they enforce: a tap that changes *who's playing* cancels the run, because its
@@ -713,40 +726,41 @@ answer would be for the wrong people; a tap that changes *the teams on show* is 
 because the new proposals are about to replace them.
 
 - Ticking someone mid-run cancels it, and no proposals ever arrive
-  ([`MatchDayViewModelTest.kt:150-160`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModelTest.kt#L150-L160)).
+  ([`MatchDayViewModelTest.kt:402-412`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModelTest.kt#L402-L412)).
 - Adding a player mid-run cancels it, the stale answer never lands, and the next run
-  includes the newcomer ([`MatchDayViewModelTest.kt:439-453`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModelTest.kt#L439-L453)).
-- Continue while re-generating is ignored ([`MatchDayViewModelTest.kt:407-421`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModelTest.kt#L407-L421)), and so
-  are moving, choosing a card and locking ([`MatchDayViewModelTest.kt:423-437`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModelTest.kt#L423-L437)).
+  includes the newcomer ([`MatchDayViewModelTest.kt:793-808`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModelTest.kt#L793-L808)).
+- Continue while re-generating is ignored ([`MatchDayViewModelTest.kt:761-775`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModelTest.kt#L761-L775)), and so
+  are moving, choosing a card and locking ([`MatchDayViewModelTest.kt:777-791`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModelTest.kt#L777-L791)).
 
-**Why moving a player clears their lock** ([`MatchDayViewModelTest.kt:295-306`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModelTest.kt#L295-L306)). The
+**Why moving a player clears their lock** ([`MatchDayViewModelTest.kt:547-558`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModelTest.kt#L547-L558)). The
 original web version left locks alone when you edited. But a lock means "keep them on
 this side". If Ottoline is locked to the Bibs and you move her to the Non-bibs, the
 original kept the Bibs lock, so the next re-generate would put her straight back, and
 the chip in the Non-bibs column would show a lock that doesn't match. Clearing it keeps
 what the screen shows and what re-generate does in step. The test locks two players,
 moves one, and checks only the other's lock survives. Related tests check that unticking
-drops a lock ([`MatchDayViewModelTest.kt:283-293`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModelTest.kt#L283-L293)), that a stale lock can't make
-Generate fail after ticks change ([`MatchDayViewModelTest.kt:268-281`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModelTest.kt#L268-L281)), and that locks
+drops a lock ([`MatchDayViewModelTest.kt:535-545`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModelTest.kt#L535-L545)), that a stale lock can't make
+Generate fail after ticks change ([`MatchDayViewModelTest.kt:520-533`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModelTest.kt#L520-L533)), and that locks
 which can't be met show the engine's reason and keep the old proposals
-([`MatchDayViewModelTest.kt:308-320`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModelTest.kt#L308-L320)).
+([`MatchDayViewModelTest.kt:560-572`](../../app/src/test/kotlin/io/github/valnrys/teambayes/matchday/MatchDayViewModelTest.kt#L560-L572)).
 
-**`MatchDayScreenTest.kt`** (5 tests, on a phone) drives the real screens by visible
-text and by the names TalkBack reads ([`MatchDayScreenTest.kt:27-30`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L27-L30)). It finds a chip
-by its TalkBack name plus its button role ([`MatchDayScreenTest.kt:40-46`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L40-L46)), which also
+**`MatchDayScreenTest.kt`** (7 tests, on a phone) drives the real screens by visible
+text and by the names TalkBack reads ([`MatchDayScreenTest.kt:36-42`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L36-L42)). It finds a chip
+by its TalkBack name plus its button role ([`MatchDayScreenTest.kt:59-65`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L59-L65)), which also
 proves those names exist. Because the roster list is lazy, a row below the fold doesn't
 exist until it's scrolled to, so `tickFour` scrolls the list itself, found by
 `ROSTER_LIST_TAG`, with `performScrollToNode`, then taps each name and checks it's
 ticked straight away, while the row is certainly still on screen
-([`MatchDayScreenTest.kt:56-67`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L56-L67)). Pinned buttons are on screen whenever the keyboard is
-closed, so `tap` just clicks them ([`MatchDayScreenTest.kt:69-72`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L69-L72)). It covers: typing
-in the search field shows only the matching player ([`MatchDayScreenTest.kt:95-105`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L95-L105));
+([`MatchDayScreenTest.kt:77-88`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L77-L88)). Pinned buttons are on screen whenever the keyboard is
+closed, so `tap` just clicks them ([`MatchDayScreenTest.kt:90-96`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L90-L96)). It covers: typing
+in the search field shows only the matching player ([`MatchDayScreenTest.kt:119-129`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L119-L129));
 generate then move a chip to get EDITED and the meter
-([`MatchDayScreenTest.kt:107-111`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L107-L111)); the discard dialog's Cancel and Discard
-([`MatchDayScreenTest.kt:113-126`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L113-L126)); the manual board through to confirm
-([`MatchDayScreenTest.kt:128-150`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L128-L150)); and the amber uneven button still confirming
-([`MatchDayScreenTest.kt:152-166`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L152-L166)). It waits up to five seconds for results, because
-the balancer runs on a real thread the test rule doesn't track.
+([`MatchDayScreenTest.kt:131-135`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L131-L135)); the discard dialog's Cancel and Discard
+([`MatchDayScreenTest.kt:137-150`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L137-L150)); the manual board through to confirm
+([`MatchDayScreenTest.kt:152-179`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L152-L179)); the amber uneven button still confirming
+([`MatchDayScreenTest.kt:181-196`](../../app/src/androidTest/kotlin/io/github/valnrys/teambayes/matchday/MatchDayScreenTest.kt#L181-L196)); and, since milestone 3, placing a new player and a
+whole match day through to the rating movement. It waits up to five seconds for results,
+because the balancer runs on a real thread the test rule doesn't track.
 
 **`BalancerTimingTest.kt`** (2 tests, on a phone) runs the balancer twice to warm up,
 then seven measured times, and logs the median and maximum to logcat
@@ -763,12 +777,8 @@ an emulator still records its numbers.
 
 These are deliberate for now.
 
-- **No storage yet.** The roster is 14 sample players, a new player lives only in
-  memory, and a ViewModel survives rotation but not Android closing the app in the
-  background. Storage is the next milestone.
-- **Confirm doesn't save.** It shows "Saving games arrives in the next milestone" and
-  goes back to the roster. Recording the result and showing rating changes, which the
-  original did next, come with storage, as does the date field.
+- **Storage arrived in milestone 3.** Players, games, recording the result and surviving
+  process death are covered, with their own gaps, in [walkthrough 3](03-saving-games.md#7-known-gaps).
 - **No release shrinking.** R8, which strips unused code from release builds, is
   deferred to the release-signing work so both can be tested together ([decisions.md](../decisions.md)).
 - **Timing varies.** On a Pixel 9 Pro, 18 players take a median of about 65 ms. 20
@@ -778,7 +788,7 @@ These are deliberate for now.
   splits while the app asks for 3; the cost is in trying every split, so that barely
   matters. With more than 100,000 possible splits (over 20 players, unless locks cut the
   count) the balancer samples, and the step says so.
-- **The guard doesn't check the test APK** ([`build.gradle.kts:140-141`](../../app/build.gradle.kts#L140-L141)). It never
+- **The guard doesn't check the test APK** ([`build.gradle.kts:166-167`](../../app/build.gradle.kts#L166-L167)). It never
   ships to users, but a test library could add a permission there unnoticed.
 
 ---

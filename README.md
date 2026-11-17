@@ -2,7 +2,7 @@
 
 An offline Android app that picks balanced 5-a-side teams and learns from results.
 
-**Status:** the rating engine (Kotlin, checked against openskill reference fixtures) is done, and the Android app runs match day: tick who's playing, pick one of three proposed Bibs / Non-bibs splits or make teams by hand, adjust, and confirm. The app has no storage yet, so confirming doesn't save. See [docs/model.md](docs/model.md) for how it works, and the walkthroughs of the [engine](docs/walkthrough/01-engine.md) and of [match day](docs/walkthrough/02-match-day.md) for a tour of the code.
+**Status:** the rating engine (Kotlin, checked against openskill reference fixtures) is done, and the Android app stores its players and games on the phone. First run asks for the players and a rough ranking; match day picks one of three proposed Bibs / Non-bibs splits or makes teams by hand, saves the game, records goals as they go in, and shows how the result moved everyone's Skill. An unfinished game survives the app being closed. See [docs/model.md](docs/model.md) for how it works, and the walkthroughs of the [engine](docs/walkthrough/01-engine.md), [match day](docs/walkthrough/02-match-day.md) and [saving games](docs/walkthrough/03-saving-games.md) for a tour of the code.
 
 ## Licence
 
@@ -28,5 +28,7 @@ TeamBayes is offline by design. Every app build (debug and release) checks the f
 
 ```sh
 ./gradlew test                          # engine and app unit tests
-./gradlew :app:connectedDebugAndroidTest # needs a connected phone; includes an on-device timing check
+./gradlew :app:connectedDebugAndroidTest # needs an emulator or a spare phone; includes an on-device timing check
 ```
+
+Run the instrumented tests on an emulator or a spare phone, never on the phone that holds your group's games. They use an in-memory database and leave the app installed, but installing a debug build over your real app could still cost data.
