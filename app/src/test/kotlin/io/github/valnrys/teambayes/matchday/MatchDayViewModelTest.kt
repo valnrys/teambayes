@@ -1,7 +1,25 @@
 package io.github.valnrys.teambayes.matchday
 
+import androidx.lifecycle.SavedStateHandle
 import io.github.valnrys.teambayes.R
+import io.github.valnrys.teambayes.data.FinalGame
+import io.github.valnrys.teambayes.data.PlayerGoals
+import io.github.valnrys.teambayes.data.RatingsRepository
+import io.github.valnrys.teambayes.data.Selection
+import io.github.valnrys.teambayes.data.StoredPlayer
+import io.github.valnrys.teambayes.engine.EngineConfig
+import io.github.valnrys.teambayes.engine.Outcome
+import io.github.valnrys.teambayes.engine.Prior
+import io.github.valnrys.teambayes.engine.Rating
 import io.github.valnrys.teambayes.engine.Side
+import io.github.valnrys.teambayes.fakes.InMemoryGameRepository
+import io.github.valnrys.teambayes.fakes.InMemoryPlayerRepository
+import io.github.valnrys.teambayes.fakes.storedFrom
+import java.time.Clock
+import kotlinx.coroutines.CompletableDeferred
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -24,6 +42,9 @@ import org.junit.Test
 
 /**
  * Tests for [MatchDayViewModel] that run on the laptop, with no phone needed.
+ *
+ * Storage is replaced by in-memory repositories (see `fakes/`) holding the sample
+ * players, so each test starts with fourteen stored players and no games.
  *
  * Two test dispatchers share one clock. The "main thread" one is unconfined, so the
  * ViewModel's coroutine starts at once. The "balancer thread" one is standard: it runs
@@ -50,8 +71,33 @@ class MatchDayViewModelTest {
 
     private val players = SamplePlayers.all
 
+    /** 17 November 2026, 9am in London. */
+    private val clock = Clock.fixed(Instant.parse("2026-11-17T09:00:00Z"), ZoneId.of("Europe/London"))
+    private val today = LocalDate.of(2026, 11, 17)
+
+    private val playerRepository = InMemoryPlayerRepository(players.map { storedFrom(it) })
+    private val gameRepository = InMemoryGameRepository()
+    private val savedState = SavedStateHandle()
+
+    /**
+     * A ViewModel on the in-memory repositories. Everything but the balancer runs at once,
+     * so the roster has loaded by the time this returns.
+     */
+    private fun newViewModel(
+        players: InMemoryPlayerRepository = playerRepository,
+        games: InMemoryGameRepository = gameRepository,
+        handle: SavedStateHandle = savedState,
+    ) = MatchDayViewModel(
+        playerRepository = players,
+        gameRepository = games,
+        ratingsRepository = RatingsRepository(players, games, dispatcher = mainDispatcher),
+        savedStateHandle = handle,
+        generateDispatcher = balancerDispatcher,
+        clock = clock,
+    )
+
     /** A ViewModel with the first [count] sample players ticked. */
-    private fun viewModel(count: Int) = MatchDayViewModel(players, balancerDispatcher).apply {
+    private fun viewModel(count: Int) = newViewModel().apply {
         players.take(count).forEach { toggleSelected(it.id) }
     }
 
@@ -67,10 +113,49 @@ class MatchDayViewModelTest {
 
     @Test
     fun roster_isAlphabeticalAndStartsWithNobodySelected() {
-        val vm = MatchDayViewModel(players, balancerDispatcher)
+        val vm = newViewModel()
+        assertFalse(vm.now.loading)
         assertEquals(players.map { it.name }.sorted(), vm.now.players.map { it.name })
         assertTrue(vm.now.selectedIds.isEmpty())
         assertFalse(vm.now.canMakeTeams)
+        assertEquals(today, vm.now.playDate)
+    }
+
+    @Test
+    fun roster_leavesOutInactivePlayers() {
+        val retired = StoredPlayer("old", "Retired Rita", active = false, startingMu = 25.0, createdAt = 0)
+        val vm = newViewModel(players = InMemoryPlayerRepository(players.map { storedFrom(it) } + retired))
+        assertFalse(vm.now.players.any { it.id == "old" })
+        assertEquals(players.size, vm.now.players.size)
+    }
+
+    @Test
+    fun roster_usesStartingRatingsUntilGamesAreFinalised() {
+        val vm = newViewModel()
+        players.forEach { assertEquals(it.rating, vm.now.ratingsById.getValue(it.id)) }
+    }
+
+    @Test
+    fun roster_usesRatingsReplayedFromFinalisedGames() {
+        // The best two beat the worst two: the winners' mu goes up, the losers' down.
+        val (a1, a2) = players.take(2).map { it.id }
+        val (b1, b2) = players.takeLast(2).map { it.id }
+        val game = FinalGame(
+            id = "g1", playedAt = 0, createdAt = 0, selection = Selection.GENERATED,
+            outcome = Outcome.A_WINS, scoreA = 3, scoreB = 1,
+            teamA = listOf(PlayerGoals(a1, 0), PlayerGoals(a2, 0)),
+            teamB = listOf(PlayerGoals(b1, 0), PlayerGoals(b2, 0)),
+        )
+        val vm = newViewModel(games = InMemoryGameRepository(listOf(game)))
+
+        val before = players.associate { it.id to it.rating }
+        val after = vm.now.ratingsById
+        assertTrue(after.getValue(a1).mu > before.getValue(a1).mu)
+        assertTrue(after.getValue(b1).mu < before.getValue(b1).mu)
+        assertTrue(after.getValue(a1).sigma < EngineConfig.SIGMA0)
+        // Someone who didn't play keeps their starting rating.
+        val bench = players[5].id
+        assertEquals(before.getValue(bench), after.getValue(bench))
     }
 
     @Test
@@ -83,16 +168,160 @@ class MatchDayViewModelTest {
     }
 
     @Test
-    fun addPlayer_addsSelectsAndClearsTheField() {
+    fun addPlayer_opensTheSheetInTheMiddleAndSavesNothingYet() {
         val vm = viewModel(0)
         vm.setNewPlayerName("  Aurelio ")
         vm.addPlayer()
 
+        assertEquals(NewPlayerPlacement("Aurelio", position = players.size / 2), vm.now.placing)
+        assertTrue(playerRepository.added.isEmpty())
+        assertEquals(players.size, vm.now.players.size)
+    }
+
+    @Test
+    fun placementRanking_isBestFirstByCurrentMu() {
+        val vm = viewModel(0)
+        // The sample players are made best first, and nobody has played yet.
+        assertEquals(players.map { it.id }, vm.now.ranking.map { it.id })
+        val mus = vm.now.ranking.map { it.rating.mu }
+        assertEquals(mus.sortedDescending(), mus)
+    }
+
+    @Test
+    fun saveNewPlayer_storesTheMidpointOfTheNeighboursMuAndTicksThem() {
+        val vm = viewModel(0)
+        vm.setNewPlayerName("Aurelio")
+        vm.addPlayer()
+        vm.moveNewPlayer(3) // between the 3rd and 4th best
+        vm.saveNewPlayer()
+
+        val ranking = players // best first
+        val expected = Prior.insertBetween(ranking[2].rating.mu, ranking[3].rating.mu)
+        assertEquals(listOf("Aurelio" to expected), playerRepository.added)
+        assertEquals((ranking[2].rating.mu + ranking[3].rating.mu) / 2, expected, 1e-12)
+
         val added = vm.now.players.single { it.name == "Aurelio" }
         assertEquals(setOf(added.id), vm.now.selectedIds)
+        assertEquals(Rating(expected, EngineConfig.SIGMA0), added.rating)
+        assertNull(vm.now.placing)
         assertEquals("", vm.now.newPlayerName)
-        assertEquals(players.size + 1, vm.now.players.size)
         assertEquals("Aurelio", vm.now.players.first().name) // still A to Z
+    }
+
+    @Test
+    fun saveNewPlayer_atTheTopOrBottomStepsOneBetaPastTheEnd() {
+        val vm = viewModel(0)
+        vm.setNewPlayerName("Top")
+        vm.addPlayer()
+        vm.moveNewPlayer(-5) // pulled back to the top
+        assertEquals(0, vm.now.placing!!.position)
+        vm.saveNewPlayer()
+
+        vm.setNewPlayerName("Bottom")
+        vm.addPlayer()
+        vm.moveNewPlayer(999) // pulled back to the bottom
+        vm.saveNewPlayer()
+
+        val best = players.first().rating.mu
+        val worst = players.last().rating.mu
+        assertEquals(
+            listOf("Top" to best + EngineConfig.BETA, "Bottom" to worst - EngineConfig.BETA),
+            playerRepository.added,
+        )
+    }
+
+    @Test
+    fun startingMuAt_usesNeighboursFromTheMuOrderNotTheNameOrder() {
+        // Alphabetical order would put Zed (high mu) below Amy (low mu): insertBetween would refuse.
+        val amy = Player("a", "Amy", Rating(20.0, EngineConfig.SIGMA0))
+        val zed = Player("z", "Zed", Rating(30.0, EngineConfig.SIGMA0))
+        val state = MatchDayUiState(players = listOf(amy, zed))
+        assertEquals(listOf(zed, amy), state.ranking)
+        assertEquals(25.0, startingMuAt(state.ranking, 1), 1e-12)
+    }
+
+    @Test
+    fun saveNewPlayer_beforeStorageReportsThemTheyCanAlreadyPlay() = runTest(mainDispatcher) {
+        val slow = InMemoryPlayerRepository(players.map { storedFrom(it) }, reportAddsAtOnce = false)
+        val vm = newViewModel(players = slow)
+        players.take(3).forEach { vm.toggleSelected(it.id) }
+        vm.setNewPlayerName("Aurelio")
+        vm.addPlayer()
+        vm.saveNewPlayer()
+
+        // Stored, but the flow hasn't emitted yet: the roster shows them anyway.
+        val added = vm.now.players.single { it.name == "Aurelio" }
+        assertTrue(added.id in vm.now.selectedIds)
+        assertEquals("Aurelio", vm.now.namesById[added.id])
+
+        // Make teams manually used to crash here, looking up a name it didn't have.
+        vm.makeTeamsManually()
+        assertTrue(added.id in vm.now.workingCopy!!.pool)
+        vm.back()
+
+        // Generate includes them.
+        vm.generate()
+        advanceUntilIdle()
+        vm.now.splits.forEach { assertTrue(added.id in it.teamA + it.teamB) }
+
+        // The same name again is refused before storage reports the first.
+        vm.setNewPlayerName("aurelio")
+        vm.addPlayer()
+        assertEquals("aurelio", vm.now.duplicateName)
+
+        // When storage catches up, they're listed once, with the same id.
+        slow.reportAdds()
+        assertEquals(added, vm.now.players.single { it.name == "Aurelio" })
+        assertEquals(players.size + 1, vm.now.players.size)
+    }
+
+    @Test
+    fun saveNewPlayer_secondTapWhileSavingDoesNothing() = runTest(mainDispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        playerRepository.gate = gate
+        val vm = viewModel(0)
+        vm.setNewPlayerName("Aurelio")
+        vm.addPlayer()
+
+        vm.saveNewPlayer()
+        assertTrue(vm.now.placing!!.saving)
+        vm.saveNewPlayer() // the double tap
+        gate.complete(Unit)
+
+        assertEquals(listOf("Aurelio"), playerRepository.added.map { it.first })
+        assertNull("No 'already exists' from the second tap", vm.now.duplicateName)
+        assertNull(vm.now.placing)
+        assertEquals(1, vm.now.players.count { it.name == "Aurelio" })
+    }
+
+    @Test
+    fun saveNewPlayer_whenStorageReportsThemFirstTheyAreListedOnce() = runTest(mainDispatcher) {
+        // The default fake's flow emits inside addPlayer, before it returns its id.
+        val vm = viewModel(0)
+        vm.setNewPlayerName("Aurelio")
+        vm.addPlayer()
+        vm.saveNewPlayer()
+        assertEquals(1, vm.now.players.count { it.name == "Aurelio" })
+
+        // Another emission (the next player) mustn't bring back a second copy.
+        vm.setNewPlayerName("Beatrix")
+        vm.addPlayer()
+        vm.saveNewPlayer()
+        assertEquals(1, vm.now.players.count { it.name == "Aurelio" })
+        assertEquals(1, vm.now.players.count { it.name == "Beatrix" })
+        assertEquals(players.size + 2, vm.now.players.size)
+    }
+
+    @Test
+    fun cancelNewPlayer_closesTheSheetAndKeepsTheName() {
+        val vm = viewModel(0)
+        vm.setNewPlayerName("Aurelio")
+        vm.addPlayer()
+        vm.cancelNewPlayer()
+
+        assertNull(vm.now.placing)
+        assertEquals("Aurelio", vm.now.newPlayerName)
+        assertTrue(playerRepository.added.isEmpty())
     }
 
     @Test
@@ -102,11 +331,31 @@ class MatchDayViewModelTest {
         vm.addPlayer()
 
         assertEquals("tamsin", vm.now.duplicateName)
+        assertNull("No sheet for a name that's taken", vm.now.placing)
         assertEquals(players.size, vm.now.players.size)
         assertTrue(vm.now.selectedIds.isEmpty())
         // Typing again clears the message.
         vm.setNewPlayerName("tamsin2")
         assertNull(vm.now.duplicateName)
+    }
+
+    @Test
+    fun addPlayer_comparesNamesAsStorageDoes() {
+        val sam = StoredPlayer("s", "Sam Smith", active = true, startingMu = 25.0, createdAt = 0)
+        val vm = newViewModel(players = InMemoryPlayerRepository(listOf(sam)))
+        vm.setNewPlayerName("  sam   SMITH ")
+        vm.addPlayer()
+        assertEquals("sam SMITH", vm.now.duplicateName)
+        assertNull(vm.now.placing)
+    }
+
+    @Test
+    fun addPlayer_refusesTheNameOfAnInactivePlayer() {
+        val retired = StoredPlayer("old", "Rita", active = false, startingMu = 25.0, createdAt = 0)
+        val vm = newViewModel(players = InMemoryPlayerRepository(listOf(retired)))
+        vm.setNewPlayerName("RITA")
+        vm.addPlayer()
+        assertEquals("RITA", vm.now.duplicateName)
     }
 
     @Test
@@ -372,10 +621,114 @@ class MatchDayViewModelTest {
         vm.continueToConfirm()
         vm.confirm()
         assertEquals(Step.ROSTER, vm.now.step)
-        assertEquals(R.string.notice_saving_next_milestone, vm.now.notice)
+        assertEquals(R.string.notice_game_saved, vm.now.notice)
         assertNull(vm.now.workingCopy)
+        assertEquals(10, vm.now.selectedIds.size)
         vm.noticeShown()
         assertNull(vm.now.notice)
+    }
+
+    @Test
+    fun confirm_savesThePendingGameWithItsProvenanceAndToday() = runTest(mainDispatcher) {
+        val vm = generated(10)
+        vm.movePlayer(vm.now.splits[0].teamA.first())
+        vm.continueToConfirm()
+        val chosen = vm.now.chosen!!
+
+        vm.confirm()
+
+        // Noon on 17 November in London (GMT, so UTC+0).
+        val noon = Instant.parse("2026-11-17T12:00:00Z").toEpochMilli()
+        assertEquals(
+            listOf(InMemoryGameRepository.SavedPending(noon, chosen.teamA, chosen.teamB, Selection.EDITED)),
+            gameRepository.savedPending,
+        )
+    }
+
+    @Test
+    fun confirm_savesGeneratedAndManualProvenance() = runTest(mainDispatcher) {
+        val vm = generated(4)
+        vm.continueToConfirm()
+        vm.confirm()
+        assertEquals(Selection.GENERATED, gameRepository.savedPending.single().selection)
+
+        // A second match day, on storage with no pending game yet.
+        val freshGames = InMemoryGameRepository()
+        val manual = newViewModel(games = freshGames, handle = SavedStateHandle())
+        manual.toggleSelected(players[0].id)
+        manual.toggleSelected(players[1].id)
+        manual.makeTeamsManually()
+        manual.movePlayer(players[0].id) // → Bibs
+        manual.movePlayer(players[1].id); manual.movePlayer(players[1].id) // → Non-bibs
+        manual.continueToConfirm()
+        manual.confirm()
+        assertEquals(Selection.MANUAL, freshGames.savedPending.single().selection)
+    }
+
+    @Test
+    fun confirm_storesAPickedDateAtLocalNoonAndThenResetsToToday() = runTest(mainDispatcher) {
+        val vm = generated(4)
+        vm.continueToConfirm()
+        // A summer date: London is on BST (UTC+1), so local noon is 11:00 UTC.
+        vm.setPlayDate(LocalDate.of(2026, 7, 4))
+        vm.confirm()
+
+        assertEquals(Instant.parse("2026-07-04T11:00:00Z").toEpochMilli(), gameRepository.savedPending.single().playedAt)
+        assertEquals(today, vm.now.playDate)
+    }
+
+    @Test
+    fun setPlayDate_ignoresAFutureDay() = runTest(mainDispatcher) {
+        val vm = generated(4)
+        vm.continueToConfirm()
+        vm.setPlayDate(today.plusDays(1))
+        assertEquals(today, vm.now.playDate)
+        vm.setPlayDate(today.minusDays(1))
+        assertEquals(today.minusDays(1), vm.now.playDate)
+    }
+
+    @Test
+    fun whileConfirmIsSaving_backAndTheDateAreIgnored() = runTest(mainDispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        gameRepository.gate = gate
+        val vm = generated(4)
+        vm.continueToConfirm()
+        val chosen = vm.now.chosen
+
+        vm.confirm()
+        assertTrue(vm.now.saving)
+        vm.back() // the system Back gesture
+        vm.setPlayDate(today.minusDays(3)) // a picker that was already open
+        assertEquals(Step.CONFIRM, vm.now.step)
+        assertEquals(chosen, vm.now.chosen)
+        assertEquals(today, vm.now.playDate)
+
+        gate.complete(Unit)
+        assertEquals(Step.ROSTER, vm.now.step)
+        assertEquals(today.toPlayedAt(clock.zone), gameRepository.savedPending.single().playedAt)
+    }
+
+    @Test
+    fun toPlayedAt_isLocalNoonWhateverTheZone() {
+        val day = LocalDate.of(2026, 3, 29) // the day the UK's clocks go forward
+        assertEquals(Instant.parse("2026-03-29T11:00:00Z").toEpochMilli(), day.toPlayedAt(ZoneId.of("Europe/London")))
+        assertEquals(Instant.parse("2026-03-29T16:00:00Z").toEpochMilli(), day.toPlayedAt(ZoneId.of("America/New_York")))
+    }
+
+    @Test
+    fun confirm_withAnUnfinishedGameAlreadyStoredSaysSoAndKeepsTheTeams() = runTest(mainDispatcher) {
+        gameRepository.savePending(0, listOf(players[0].id), listOf(players[1].id), Selection.MANUAL)
+        val vm = generated(4)
+        vm.continueToConfirm()
+        val chosen = vm.now.chosen
+
+        vm.confirm()
+
+        assertEquals(R.string.notice_pending_game_exists, vm.now.notice)
+        assertEquals(Step.CONFIRM, vm.now.step)
+        assertEquals(chosen, vm.now.chosen)
+        assertFalse(vm.now.saving)
+        assertEquals(1, gameRepository.savedPending.size) // only the one stored before
     }
 
     @Test
@@ -442,6 +795,7 @@ class MatchDayViewModelTest {
         vm.generate()
         vm.setNewPlayerName("Aurelio")
         vm.addPlayer()
+        vm.saveNewPlayer()
         assertFalse(vm.now.generating)
         advanceUntilIdle()
         assertEquals("The stale run must not arrive", Step.ROSTER, vm.now.step)
@@ -495,19 +849,6 @@ class MatchDayViewModelTest {
     }
 
     @Test
-    fun addPlayer_neverReusesAnId() {
-        // Two players whose ids leave a gap: counting alone would give "p03" again.
-        val gappy = listOf(players[0].copy(id = "p01"), players[1].copy(id = "p03"))
-        val vm = MatchDayViewModel(gappy, balancerDispatcher)
-        vm.setNewPlayerName("Aurelio")
-        vm.addPlayer()
-
-        val ids = vm.now.players.map { it.id }
-        assertEquals(ids.toSet().size, ids.size)
-        assertEquals("p04", vm.now.players.single { it.name == "Aurelio" }.id)
-    }
-
-    @Test
     fun back_fromGenerateLeavesNothingToContinueWith() = runTest(mainDispatcher) {
         val vm = generated(10)
         vm.back()
@@ -530,5 +871,98 @@ class MatchDayViewModelTest {
         assertEquals(Step.MANUAL, vm.now.step)
         assertTrue(vm.now.splits.isEmpty())
         assertEquals(0, vm.now.selectedSplit)
+    }
+
+    // ---- Process death ----------------------------------------------------------------------
+
+    @Test
+    fun processDeath_restoresTheEditedProposalLocksAndTicks() = runTest(mainDispatcher) {
+        val vm = generated(10)
+        vm.selectSplit(1)
+        val split = vm.now.splits[1]
+        val locked = split.teamB.last()
+        vm.toggleLock(locked, Side.B)
+        vm.movePlayer(split.teamA.first())
+        val before = vm.now
+
+        // A new ViewModel on the same saved state is what Android builds after process death.
+        val restored = newViewModel().now
+
+        assertEquals(Step.GENERATE, restored.step)
+        assertEquals(before.selectedIds, restored.selectedIds)
+        assertEquals(before.splits, restored.splits) // meters worked out again, to the same values
+        assertEquals(1, restored.selectedSplit)
+        assertEquals(before.locks, restored.locks)
+        assertEquals(before.workingCopy, restored.workingCopy)
+        assertEquals(before.liveMeter, restored.liveMeter)
+    }
+
+    @Test
+    fun processDeath_restoresTheManualBoard() = runTest(mainDispatcher) {
+        val vm = viewModel(4)
+        vm.makeTeamsManually()
+        vm.movePlayer(players[0].id)
+        vm.movePlayer(players[1].id); vm.movePlayer(players[1].id)
+
+        val restored = newViewModel().now
+
+        assertEquals(Step.MANUAL, restored.step)
+        assertEquals(vm.now.workingCopy, restored.workingCopy)
+        assertEquals(listOf(players[2].id, players[3].id), restored.workingCopy!!.pool)
+        assertNotNull(restored.liveMeter)
+    }
+
+    @Test
+    fun processDeath_restoresTheConfirmStepAndItsDate() = runTest(mainDispatcher) {
+        val vm = generated(4)
+        vm.continueToConfirm()
+        vm.setPlayDate(LocalDate.of(2026, 11, 10))
+
+        val restored = newViewModel()
+
+        assertEquals(Step.CONFIRM, restored.now.step)
+        assertEquals(vm.now.chosen, restored.now.chosen)
+        assertEquals(LocalDate.of(2026, 11, 10), restored.now.playDate)
+        // And it still saves.
+        restored.confirm()
+        assertEquals(Selection.GENERATED, gameRepository.savedPending.single().selection)
+    }
+
+    @Test
+    fun processDeath_withAPlayerWhoIsNoLongerThereFallsBackToTheRoster() = runTest(mainDispatcher) {
+        generated(4).continueToConfirm()
+        // The same saved state, but storage no longer has the best player.
+        val fewer = InMemoryPlayerRepository(players.drop(1).map { storedFrom(it) })
+
+        val restored = newViewModel(players = fewer).now
+
+        assertEquals(Step.ROSTER, restored.step)
+        assertNull(restored.chosen)
+        assertEquals(players.drop(1).take(3).map { it.id }.toSet(), restored.selectedIds)
+    }
+
+    @Test
+    fun freshStart_withNothingSavedIsAnEmptyRoster() {
+        val vm = newViewModel(handle = SavedStateHandle())
+        assertEquals(Step.ROSTER, vm.now.step)
+        assertTrue(vm.now.selectedIds.isEmpty())
+    }
+
+    @Test
+    fun restore_confirmWithoutTheBoardItReturnsToFallsBackToTheRoster() {
+        val ids = players.take(4).map { it.id }
+        val chosen = ChosenTeams(ids.take(2), ids.drop(2), Selection.EDITED)
+        val confirmOnly = SavedMatchDay(
+            step = Step.CONFIRM, selectedIds = ids, splits = emptyList(), sampled = false, selectedSplit = 0,
+            locks = emptyMap(), workingCopy = null, chosen = chosen, playDate = today, search = "", newPlayerName = "",
+        )
+        assertEquals(Step.ROSTER, confirmOnly.restore(players).step)
+        assertEquals(Step.ROSTER, confirmOnly.copy(chosen = chosen.copy(selection = Selection.MANUAL)).restore(players).step)
+        assertEquals(Step.ROSTER, confirmOnly.copy(chosen = chosen.copy(selection = Selection.GENERATED)).restore(players).step)
+
+        // With the board Back returns to, it comes back on the confirm step.
+        val board = WorkingCopy(Selection.MANUAL, ids.take(2), ids.drop(2))
+        val manual = confirmOnly.copy(chosen = chosen.copy(selection = Selection.MANUAL), workingCopy = board)
+        assertEquals(Step.CONFIRM, manual.restore(players).step)
     }
 }

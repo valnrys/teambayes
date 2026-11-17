@@ -27,6 +27,17 @@
     <string name="generate_teams">Generate teams (%1$d) →</string>
     <string name="generating">Generating…</string>
 
+    <!-- "Where do they fit?" sheet, for a player added on match day -->
+    <string name="placement_heading">Where do they fit?</string>
+    <string name="placement_explainer">Drag %1$s to where they fit, best at the top. It only sets a starting point. Results take over after a few games.</string>
+    <string name="placement_row">%1$d. %2$s</string>
+    <string name="placement_new">New</string>
+    <string name="placement_new_row">%1$d. %2$s, new player</string>
+    <string name="move_up">Move up</string>
+    <string name="move_down">Move down</string>
+    <string name="save">Save ✓</string>
+    <string name="notice_player_save_failed">Couldn\'t save the player. Please try again.</string>
+
     <!-- Generate step -->
     <string name="pick_a_split">Pick a split</string>
     <string name="sampled_note">Large roster — sampled search used (still very close to optimal).</string>
@@ -63,11 +74,32 @@
     <string name="selection_manual">Manual</string>
     <string name="confirm">Confirm ✓</string>
     <string name="teams_uneven">Teams uneven (%1$d v %2$d) — sure?</string>
-    <string name="notice_saving_next_milestone">Saving games arrives in the next milestone</string>
+    <string name="play_date">Date</string>
+    <string name="change_date">change date</string>
+    <string name="ok">OK</string>
+    <string name="saving">Saving…</string>
+    <string name="notice_game_saved">Game saved. Recording results arrives next.</string>
+    <string name="notice_pending_game_exists">There\'s already an unfinished match day</string>
+    <string name="notice_game_save_failed">Couldn\'t save the game. Please try again.</string>
 
     <!-- Reasons the balancer can refuse -->
     <string name="problem_too_few">Generating teams needs at least 4 players. With fewer, make teams manually.</string>
     <string name="problem_too_many">Too many players selected. The most we can balance is 64.</string>
     <string name="problem_locks">Those locks can\'t all be met. Unlock someone and re-generate.</string>
     <string name="problem_unexpected">Something went wrong. Please try again.</string>
+    <!-- First run: add players, then rank them -->
+    <string name="first_run_add_heading">Add your players</string>
+    <string name="first_run_add_explainer">Add everyone who plays. You can add more later.</string>
+    <string name="first_run_name_label">Player name</string>
+    <string name="first_run_empty">No players yet.</string>
+    <string name="first_run_few_players_hint">Add at least 2 players to go on. Match day needs 4 to generate teams.</string>
+    <string name="first_run_match_day_hint">Match day needs 4 players to generate teams.</string>
+    <string name="first_run_next">Next →</string>
+    <string name="first_run_remove">Remove %1$s</string>
+    <string name="first_run_load_samples">Load sample players</string>
+    <string name="first_run_rank_heading">Put them in rough order</string>
+    <string name="first_run_rank_explainer">Drag the best player to the top. It only sets a starting point. Results take over after a few games.</string>
+    <string name="first_run_rank_row">%1$d. %2$s</string>
+    <string name="first_run_save">Save players ✓</string>
+    <string name="first_run_save_failed">Couldn\'t save the players. Please try again.</string>
 </resources>

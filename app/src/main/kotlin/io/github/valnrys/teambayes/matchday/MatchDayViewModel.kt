@@ -1,21 +1,44 @@
 package io.github.valnrys.teambayes.matchday
 
 import androidx.annotation.StringRes
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import io.github.valnrys.teambayes.AppContainer
 import io.github.valnrys.teambayes.R
+import io.github.valnrys.teambayes.data.DuplicateNameException
+import io.github.valnrys.teambayes.data.GameRepository
+import io.github.valnrys.teambayes.data.PendingGameExistsException
+import io.github.valnrys.teambayes.data.PlayerRepository
+import io.github.valnrys.teambayes.data.RatingsRepository
+import io.github.valnrys.teambayes.data.Selection
+import io.github.valnrys.teambayes.data.RatedPlayer
+import io.github.valnrys.teambayes.data.normaliseName
 import io.github.valnrys.teambayes.engine.BalanceResult
 import io.github.valnrys.teambayes.engine.Balancer
 import io.github.valnrys.teambayes.engine.BalancerPlayer
 import io.github.valnrys.teambayes.engine.EngineConfig
+import io.github.valnrys.teambayes.engine.Prior
 import io.github.valnrys.teambayes.engine.Rating
 import io.github.valnrys.teambayes.engine.Side
+import java.time.Clock
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNot
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -32,8 +55,8 @@ const val MIN_PLAYERS_MANUAL = 2
 /**
  * The four steps of match day, in the order the organiser meets them.
  *
- * The original web version went on to record the result and show rating changes. Those
- * steps arrive with storage in the next milestone.
+ * The original web version goes on to record the result and show rating changes. Those
+ * steps arrive next; for now, confirming saves the teams as the pending game.
  */
 enum class Step {
     /** "Who's playing?": tick players, then generate or make teams by hand. */
@@ -45,7 +68,7 @@ enum class Step {
     /** "Make teams manually": the Pool / Bibs / Non-bibs board. */
     MANUAL,
 
-    /** "Confirm teams": a last look before the game is saved. */
+    /** "Confirm teams": a last look, and the date, before the game is saved. */
     CONFIRM,
 }
 
@@ -71,17 +94,31 @@ sealed interface DiscardAction {
 }
 
 /**
+ * A new player waiting in the "Where do they fit?" sheet.
+ *
+ * @property name the name typed in "+ New player", without spaces at the ends.
+ * @property position where they sit in [MatchDayUiState.ranking]: 0 is above everyone,
+ *   `ranking.size` is below everyone.
+ * @property saving true while they are being written to storage.
+ */
+data class NewPlayerPlacement(val name: String, val position: Int, val saving: Boolean = false)
+
+/**
  * Everything the match-day screens draw, as one immutable value.
  *
  * It's deliberately flat: one field per thing the organiser can see or change, in the
  * same shape as the original web version's screen state. Fields belonging to a later
  * step simply sit unused until then.
  *
- * @property players everyone who could play, in name order (A to Z).
+ * @property players everyone who could play (the active players), in name order (A to Z).
+ * @property loading true until the players have been read from storage. Nothing is drawn
+ *   meanwhile, which takes a few milliseconds.
  * @property selectedIds who is playing, in the order they were ticked.
  * @property search the text in the search field.
  * @property newPlayerName the text in the "+ New player" field.
  * @property duplicateName set when the last name added was already taken.
+ * @property placing the new player being placed in the "Where do they fit?" sheet, or
+ *   `null` while the sheet is closed.
  * @property step which screen is showing.
  * @property generating true while the balancer is running. Taps that change the teams
  *   are ignored meanwhile, because the new proposals would overwrite them.
@@ -93,15 +130,19 @@ sealed interface DiscardAction {
  * @property workingCopy teams being edited by hand, or `null` if nothing has been moved.
  * @property liveMeter the engine's view of [workingCopy], or `null` while a side is empty.
  * @property chosen the teams on the confirm step.
+ * @property playDate the day the game is played, shown on the confirm step. Today by default.
+ * @property saving true while Confirm is writing the game to storage.
  * @property discardPrompt set while the "Discard your edits?" dialog is open.
  * @property notice a one-off message for the snackbar; cleared once shown.
  */
 data class MatchDayUiState(
     val players: List<Player>,
+    val loading: Boolean = false,
     val selectedIds: Set<String> = emptySet(),
     val search: String = "",
     val newPlayerName: String = "",
     val duplicateName: String? = null,
+    val placing: NewPlayerPlacement? = null,
     val step: Step = Step.ROSTER,
     val generating: Boolean = false,
     @param:StringRes val problem: Int? = null,
@@ -112,6 +153,8 @@ data class MatchDayUiState(
     val workingCopy: WorkingCopy? = null,
     val liveMeter: Meter? = null,
     val chosen: ChosenTeams? = null,
+    val playDate: LocalDate = LocalDate.now(),
+    val saving: Boolean = false,
     val discardPrompt: DiscardAction? = null,
     @param:StringRes val notice: Int? = null,
 ) {
@@ -124,6 +167,14 @@ data class MatchDayUiState(
     /** The roster rows to show: names containing the search text, ignoring case. */
     val visiblePlayers: List<Player> by lazy {
         players.filter { it.name.contains(search.trim(), ignoreCase = true) }
+    }
+
+    /**
+     * The players best first, by current mu, for the "Where do they fit?" sheet. Ties go
+     * by name, so the order never jumps about between redraws.
+     */
+    val ranking: List<Player> by lazy {
+        players.sortedWith(compareByDescending<Player> { it.rating.mu }.thenBy { it.name.lowercase() })
     }
 
     /**
@@ -146,29 +197,130 @@ data class MatchDayUiState(
 }
 
 /**
+ * The starting mu for a new player placed at [position] in [ranking] (best first).
+ *
+ * Their neighbours are the players just above and just below that spot, and
+ * [Prior.insertBetween] takes it from there: the midpoint between them, or one step
+ * beyond the end. [ranking] must be sorted by current mu, best first, as
+ * [MatchDayUiState.ranking] is, because `insertBetween` refuses neighbours the wrong way
+ * round.
+ */
+fun startingMuAt(ranking: List<Player>, position: Int): Double = Prior.insertBetween(
+    above = ranking.getOrNull(position - 1)?.rating?.mu,
+    below = ranking.getOrNull(position)?.rating?.mu,
+)
+
+/**
+ * The moment stored for a game played on this day: **local noon**, in epoch milliseconds.
+ *
+ * Storage keeps an instant, but the organiser picks a day. Midnight would be fragile: the
+ * same instant read in a time zone an hour to the west is the day before, and on a
+ * daylight-saving change midnight can fall in the hour that's skipped. Noon is twelve
+ * hours from either edge, so the day reads back the same anywhere within twelve hours of
+ * here, and clock changes, which happen at night, never move it.
+ */
+fun LocalDate.toPlayedAt(zone: ZoneId): Long = atTime(LocalTime.NOON).atZone(zone).toInstant().toEpochMilli()
+
+/**
  * Runs match day: the step machine, the balancer, and every tap in between.
  *
  * The screen reads [state] and calls the public functions here; it never changes
- * anything itself. A [ViewModel] outlives screen rotations, so a half-made set of teams
- * survives turning the phone. It doesn't survive the system closing the app in the
- * background yet; storage arrives in the next milestone.
+ * anything itself.
  *
- * @param players who could play. The sample players until storage exists.
+ * **Where the data comes from.** The roster is the active players from [playerRepository],
+ * each with their current rating, from [RatingsRepository.roster]: one feed, worked out
+ * off the main thread by replaying every finished game (a player with none has their
+ * starting mu and [EngineConfig.SIGMA0]). It's watched, so a newly added player appears
+ * by themselves. "Confirm ✓" saves the teams
+ * through [gameRepository] as the pending game.
+ *
+ * **Surviving rotation and process death.** A [ViewModel] outlives screen rotations for
+ * free. Android can also kill the whole app in the background; then [savedStateHandle]
+ * brings back the step, ticks, proposals, edits, locks and date (see [SavedMatchDay]).
+ * Every change of state is mirrored into it; ratings are read from storage again.
+ *
+ * Built by [factory] in the app; tests call the constructor with fakes.
+ *
+ * @param savedStateHandle the bundle that outlives process death. Tests pass a plain
+ *   `SavedStateHandle()`, or a used one to act out a restart.
  * @param generateDispatcher where the balancer runs, off the main thread. Tests pass a
  *   test dispatcher so they decide when the work finishes.
+ * @param clock gives "today" for the date and the time zone for [toPlayedAt]. Tests pass a
+ *   fixed one.
  */
 class MatchDayViewModel(
-    players: List<Player> = SamplePlayers.all,
+    private val playerRepository: PlayerRepository,
+    private val gameRepository: GameRepository,
+    ratingsRepository: RatingsRepository,
+    private val savedStateHandle: SavedStateHandle,
     private val generateDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val clock: Clock = Clock.systemDefaultZone(),
 ) : ViewModel(), MatchDayActions {
 
-    private val _state = MutableStateFlow(MatchDayUiState(players.sortedBy { it.name.lowercase() }))
+    /** What process death left behind, applied once the players have loaded. */
+    private val restored: SavedMatchDay? = SavedMatchDay.readFrom(savedStateHandle)
+
+    private val _state = MutableStateFlow(MatchDayUiState(players = emptyList(), loading = true, playDate = today()))
 
     /** The current screen state. Collect it; it always has a value. */
     val state: StateFlow<MatchDayUiState> = _state.asStateFlow()
 
+    /** Every stored name, inactive players included, as [nameKey]s: names must be unique among all of them. */
+    private var takenNames: Set<String> = emptySet()
+
+    /**
+     * Players just saved from "+ New player" that storage hasn't reported back yet, by id.
+     *
+     * Saving returns before the players flow emits again, and the new player is ticked at
+     * once. Until the flow catches up they're shown from here, so every id on the roster
+     * has a name and a rating (Make teams manually and Generate both rely on that). Each
+     * leaves this map as soon as an emission includes them.
+     */
+    private val awaitingStorage = mutableMapOf<String, Player>()
+
     /** The balancer run in progress, if any, so it can be cancelled. */
     private var generateJob: Job? = null
+
+    init {
+        viewModelScope.launch {
+            ratingsRepository.roster.map { roster ->
+                awaitingStorage.keys.removeAll(roster.map { it.stored.id }.toSet())
+                takenNames = (roster.map { it.stored.name } + awaitingStorage.values.map { it.name })
+                    .map(::nameKey)
+                    .toSet()
+                (roster.filter { it.stored.active }.map { it.toPlayer() } + awaitingStorage.values)
+                    .sortedBy { it.name.lowercase() }
+            }.collect(::showPlayers)
+        }
+        // Mirror the state into the saved-state bundle. Only once loaded, so the empty
+        // placeholder never overwrites a match day waiting to be restored.
+        viewModelScope.launch {
+            state.filterNot { it.loading }
+                .map { it.toSaved() }
+                .distinctUntilChanged()
+                .collect { it.writeTo(savedStateHandle) }
+        }
+    }
+
+    /**
+     * Shows the latest players and ratings. The first time, this is also when a match day
+     * saved before process death comes back. Afterwards the meters are worked out again,
+     * in case a rating moved.
+     */
+    private fun showPlayers(players: List<Player>) = _state.update { current ->
+        if (current.loading) {
+            restored?.restore(players) ?: MatchDayUiState(players = players, playDate = current.playDate)
+        } else {
+            val ratings = players.associate { it.id to it.rating }
+            current.copy(
+                players = players,
+                splits = current.splits.map { it.copy(meter = meterFor(ratings, it.teamA, it.teamB) ?: it.meter) },
+                liveMeter = current.workingCopy?.let { meterFor(ratings, it.teamA, it.teamB) },
+            )
+        }
+    }
+
+    private fun today(): LocalDate = LocalDate.now(clock)
 
     // ---- Roster -------------------------------------------------------------------------
 
@@ -196,38 +348,90 @@ class MatchDayViewModel(
         _state.update { it.copy(newPlayerName = text.take(MAX_NAME_LENGTH), duplicateName = null) }
 
     /**
-     * Adds the name in the "+ New player" field to the roster and ticks them.
+     * "Add" next to "+ New player": opens "Where do they fit?" so the organiser can place
+     * the new player among the others before they're saved.
      *
-     * Blank names are ignored. A name already on the roster (ignoring case and spaces at
-     * the ends) is refused with a message, so two "Sam"s can't be confused on the pitch.
-     * The new player starts as an average unknown, [EngineConfig.MU0] ± [EngineConfig.SIGMA0],
-     * and lives only in memory for now. Like ticking, it stops a balancer run in progress,
-     * which wouldn't include them.
+     * Blank names are ignored. A name already taken is refused with a message, so two
+     * "Sam"s can't be confused on the pitch. Names are compared as storage compares them
+     * (ignoring case, spaces at the ends and doubled spaces inside), counting players no
+     * longer on the roster.
+     *
+     * The new player starts in the middle of the ranking: most newcomers are about
+     * average, and it's the shortest drag to either end.
      */
     override fun addPlayer() {
         val current = _state.value
-        val name = current.newPlayerName.trim()
-        if (name.isEmpty()) return
-        if (current.players.any { it.name.equals(name, ignoreCase = true) }) {
+        val name = normaliseName(current.newPlayerName)
+        if (name.isEmpty() || current.placing != null) return
+        if (nameKey(name) in takenNames) {
             _state.update { it.copy(duplicateName = name) }
             return
         }
-        cancelGenerating()
-        val usedIds = current.players.map { it.id }.toSet()
-        // The first free id after the roster's size. Counting alone could repeat an id
-        // if players are ever removed, so check.
-        val id = generateSequence(current.players.size + 1) { it + 1 }
-            .map(SamplePlayers::idFor)
-            .first { it !in usedIds }
-        val player = Player(id = id, name = name, rating = Rating(EngineConfig.MU0, EngineConfig.SIGMA0))
         _state.update {
-            it.copy(
-                players = (it.players + player).sortedBy { p -> p.name.lowercase() },
-                selectedIds = it.selectedIds + player.id,
-                newPlayerName = "",
-                duplicateName = null,
-                problem = null,
-            )
+            it.copy(placing = NewPlayerPlacement(name, position = it.ranking.size / 2), duplicateName = null)
+        }
+    }
+
+    /**
+     * Moves the new player to [position] in the ranking, from a drag or from TalkBack's
+     * "Move up" and "Move down". Positions past either end are pulled back in.
+     */
+    override fun moveNewPlayer(position: Int) = _state.update {
+        val placing = it.placing
+        if (placing == null || placing.saving) {
+            it
+        } else {
+            it.copy(placing = placing.copy(position = position.coerceIn(0, it.ranking.size)))
+        }
+    }
+
+    /** "Cancel" on the sheet, or swiping it away: nothing is saved and the typed name stays. */
+    override fun cancelNewPlayer() = _state.update {
+        if (it.placing?.saving == true) it else it.copy(placing = null)
+    }
+
+    /**
+     * "Save" on the sheet: stores the new player with a starting mu between their
+     * neighbours (see [startingMuAt]) and ticks them. They appear on the roster as soon
+     * as storage reports them.
+     *
+     * Like ticking someone, it stops a balancer run in progress, which wouldn't include
+     * them. If the name turns out to be taken after all (storage also compares accented
+     * letters, such as "Émile" and "émile"), the sheet closes and the field says so.
+     */
+    override fun saveNewPlayer() {
+        val current = _state.value
+        val placing = current.placing ?: return
+        if (placing.saving) return
+        val startingMu = startingMuAt(current.ranking, placing.position)
+        _state.update { it.copy(placing = placing.copy(saving = true)) }
+        viewModelScope.launch {
+            try {
+                val id = playerRepository.addPlayer(placing.name, startingMu)
+                cancelGenerating()
+                // Show and tick them now, in one update, rather than wait for storage to
+                // report them: see [awaitingStorage].
+                // If storage was quick and has already reported them, there's nothing to wait for.
+                val player = Player(id, placing.name, Rating(startingMu, EngineConfig.SIGMA0))
+                val alreadyShown = _state.value.players.any { it.id == id }
+                if (!alreadyShown) awaitingStorage[id] = player
+                takenNames = takenNames + nameKey(player.name)
+                _state.update {
+                    it.copy(
+                        players = if (alreadyShown) it.players else (it.players + player).sortedBy { p -> p.name.lowercase() },
+                        placing = null,
+                        newPlayerName = "",
+                        selectedIds = it.selectedIds + id,
+                        problem = null,
+                    )
+                }
+            } catch (e: DuplicateNameException) {
+                _state.update { it.copy(placing = null, duplicateName = e.name) }
+            } catch (e: CancellationException) {
+                throw e // The screen went away; not a failure to report.
+            } catch (e: Exception) {
+                _state.update { it.copy(placing = null, notice = R.string.notice_player_save_failed) }
+            }
         }
     }
 
@@ -344,24 +548,73 @@ class MatchDayViewModel(
     // ---- Confirm and back ---------------------------------------------------------------
 
     /**
-     * "Confirm ✓": for now, says saving arrives next milestone and returns to the roster.
-     *
-     * The ticks are kept, so starting again doesn't mean re-ticking everyone. Locks are
-     * cleared: the roster has no lock controls, so a lock left behind would act unseen.
-     * The original web version records the game here and moves on to the result instead.
+     * The day picked in the confirm step's date picker. A future day is ignored: games are
+     * replayed in date order, so it would sort after games really played before it. The
+     * picker doesn't offer one either.
      */
-    override fun confirm() = _state.update {
-        it.copy(
-            step = Step.ROSTER,
-            splits = emptyList(),
-            selectedSplit = 0,
-            locks = emptyMap(),
-            workingCopy = null,
-            liveMeter = null,
-            chosen = null,
-            discardPrompt = null,
-            notice = R.string.notice_saving_next_milestone,
-        )
+    override fun setPlayDate(date: LocalDate) {
+        // A picker left open while Confirm saves can't change the date under the save.
+        if (_state.value.saving || date.isAfter(today())) return
+        _state.update { it.copy(playDate = date) }
+    }
+
+    /**
+     * "Confirm ✓": saves the teams as the pending game, dated [MatchDayUiState.playDate]
+     * (stored as local noon, see [toPlayedAt]), with the badge's GENERATED, EDITED or
+     * MANUAL as its selection.
+     *
+     * Once saved, it says so and returns to the roster. The ticks are kept, so starting
+     * again doesn't mean re-ticking everyone. Locks are cleared: the roster has no lock
+     * controls, so a lock left behind would act unseen. The date goes back to today.
+     *
+     * Divergence from the original web version, for now: that moves straight on to
+     * recording the result. Recording results arrives next; until then the game waits,
+     * pending, in storage.
+     *
+     * If an unfinished game is already stored, nothing is saved and the organiser stays
+     * here with a message, teams intact. A second tap while saving does nothing.
+     */
+    override fun confirm() {
+        val current = _state.value
+        val chosen = current.chosen
+        if (current.step != Step.CONFIRM || chosen == null || current.saving) return
+        _state.update { it.copy(saving = true) }
+        viewModelScope.launch {
+            @StringRes val failure: Int? = try {
+                gameRepository.savePending(
+                    playedAt = current.playDate.toPlayedAt(clock.zone),
+                    teamA = chosen.teamA,
+                    teamB = chosen.teamB,
+                    selection = chosen.selection,
+                )
+                null
+            } catch (e: PendingGameExistsException) {
+                R.string.notice_pending_game_exists
+            } catch (e: CancellationException) {
+                throw e // The screen went away; not a failure to report.
+            } catch (e: Exception) {
+                R.string.notice_game_save_failed
+            }
+            _state.update {
+                if (failure != null) {
+                    it.copy(saving = false, notice = failure)
+                } else {
+                    it.copy(
+                        step = Step.ROSTER,
+                        splits = emptyList(),
+                        selectedSplit = 0,
+                        locks = emptyMap(),
+                        workingCopy = null,
+                        liveMeter = null,
+                        chosen = null,
+                        discardPrompt = null,
+                        playDate = today(),
+                        saving = false,
+                        notice = R.string.notice_game_saved,
+                    )
+                }
+            }
+        }
     }
 
     /** The snackbar has shown [MatchDayUiState.notice], so it can be cleared. */
@@ -373,8 +626,10 @@ class MatchDayViewModel(
      * Leaving the generate or manual step drops any hand edits, as the original web
      * version does, and the locks, which can't be seen or changed from the roster.
      * Leaving the confirm step keeps both, so you land on the board you came from.
+     * Ignored while the game is being saved.
      */
     override fun back() {
+        if (_state.value.saving) return
         cancelGenerating()
         _state.update {
             when (it.step) {
@@ -428,8 +683,8 @@ class MatchDayViewModel(
                         generating = false,
                         step = Step.GENERATE,
                         splits = result.splits.map { split ->
-                            // The engine lists players by id, which for the sample players is
-                            // best first. Name order gives nothing away on a shared screen.
+                            // The engine lists players by id, which means nothing to a person.
+                            // Name order is easy to scan and gives nothing away on a shared screen.
                             val teamA = split.teamA.sortedBy { id -> names.getValue(id).lowercase() }
                             val teamB = split.teamB.sortedBy { id -> names.getValue(id).lowercase() }
                             // The balancer needs four players, so neither side is ever empty.
@@ -451,7 +706,34 @@ class MatchDayViewModel(
         generateJob = null
         _state.update { if (it.generating) it.copy(generating = false) else it }
     }
+
+    companion object {
+        /**
+         * Builds the ViewModel from the app's [AppContainer], with a [SavedStateHandle]
+         * that Android keeps across process death. Pass it to Compose's `viewModel()`.
+         * This is the whole of our "dependency injection": no library needed.
+         */
+        fun factory(container: AppContainer): ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                MatchDayViewModel(
+                    playerRepository = container.playerRepository,
+                    gameRepository = container.gameRepository,
+                    ratingsRepository = container.ratingsRepository,
+                    savedStateHandle = createSavedStateHandle(),
+                )
+            }
+        }
+    }
 }
+
+/** A stored player as match day sees them, with their current rating (their starting one if they have no games yet). */
+private fun RatedPlayer.toPlayer() = Player(id = stored.id, name = stored.name, rating = rating)
+
+/**
+ * How two names are compared: in storage's one form (see [normaliseName]), ignoring case.
+ * So "Sam  Smith" and "sam smith" are the same name, as storage would also say.
+ */
+private fun nameKey(name: String): String = normaliseName(name).lowercase()
 
 /** The plain-English sentence for each reason the balancer can refuse. */
 @StringRes

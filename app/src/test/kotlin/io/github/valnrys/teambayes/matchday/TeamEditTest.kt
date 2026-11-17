@@ -1,5 +1,6 @@
 package io.github.valnrys.teambayes.matchday
 
+import io.github.valnrys.teambayes.data.Selection
 import io.github.valnrys.teambayes.engine.EngineConfig
 import io.github.valnrys.teambayes.engine.Rating
 import io.github.valnrys.teambayes.engine.Side

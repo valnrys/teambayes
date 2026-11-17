@@ -174,13 +174,15 @@ private fun PlayerRow(name: String, checked: Boolean, onToggle: () -> Unit) {
 }
 
 /**
- * "+ New player": type a name, then Add or the keyboard's Done. A name already on the
- * roster shows "Player 'Sam' already exists" under the field, marked as an error so
- * TalkBack reads it with the field.
+ * "+ New player": type a name, then Add or the keyboard's Done, which opens "Where do they
+ * fit?" (see [PlacementSheet]) to place them before they're saved. A name already taken
+ * shows "Player 'Sam' already exists" under the field, marked as an error so TalkBack
+ * reads it with the field.
  */
 @Composable
 private fun NewPlayerField(state: MatchDayUiState, actions: MatchDayActions) {
     val duplicate = state.duplicateName
+    val keyboard = LocalSoftwareKeyboardController.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -199,7 +201,11 @@ private fun NewPlayerField(state: MatchDayUiState, actions: MatchDayActions) {
                 capitalization = KeyboardCapitalization.Words,
                 imeAction = ImeAction.Done,
             ),
-            keyboardActions = KeyboardActions(onDone = { actions.addPlayer() }),
+            // Done with a name opens "Where do they fit?". Done on an empty field just closes
+            // the keyboard, so the pinned buttons come back.
+            keyboardActions = KeyboardActions(
+                onDone = { if (state.newPlayerName.isBlank()) keyboard?.hide() else actions.addPlayer() },
+            ),
             modifier = Modifier.weight(1f),
         )
         GhostButton(

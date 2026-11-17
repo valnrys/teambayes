@@ -18,6 +18,7 @@
         and phone-to-phone transfer), and fullBackupContent="false" for Android 11 and older.
     -->
     <application
+        android:name=".TeamBayesApplication"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="false"

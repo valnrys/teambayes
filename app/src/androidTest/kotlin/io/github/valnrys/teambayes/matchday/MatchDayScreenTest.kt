@@ -1,6 +1,7 @@
 package io.github.valnrys.teambayes.matchday
 
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
@@ -9,6 +10,7 @@ import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
@@ -18,8 +20,15 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
+import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.github.valnrys.teambayes.data.Selection
+import io.github.valnrys.teambayes.inMemoryContainer
 import io.github.valnrys.teambayes.ui.theme.TeamBayesTheme
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -27,6 +36,9 @@ import org.junit.runner.RunWith
 /**
  * Match day on a real phone, driven the way a person would: by visible text and by the
  * names TalkBack reads out.
+ *
+ * Each test gets the app's real repositories on a fresh in-memory database, holding the
+ * fourteen sample players, so what Confirm saves can be read back.
  */
 @RunWith(AndroidJUnit4::class)
 class MatchDayScreenTest {
@@ -37,6 +49,13 @@ class MatchDayScreenTest {
     private val players = SamplePlayers.all.sortedBy { it.name }
     private val four = players.take(4).map { it.name }
 
+    private val container = inMemoryContainer().apply {
+        runBlocking { playerRepository.addPlayersInOrder(SamplePlayers.all.map { it.name }) }
+    }
+
+    @After
+    fun closeDatabase() = container.database.close()
+
     private val isButton = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button)
 
     /** A tappable chip, found by its TalkBack name, such as "Ottoline, Pool". */
@@ -46,12 +65,14 @@ class MatchDayScreenTest {
     private fun anyChip(name: String) = hasContentDescription("$name, ", substring = true) and isButton
 
     private fun showScreen() {
-        // Built outside setContent: a composable would make a new one on every redraw.
-        val viewModel = MatchDayViewModel(players)
         composeRule.setContent {
-            TeamBayesTheme { MatchDayRoute(viewModel) }
+            TeamBayesTheme { MatchDayRoute(container) }
         }
+        waitForText("Who's playing?")
     }
+
+    /** The pending game in storage, or `null`. */
+    private fun pendingGame() = runBlocking { container.gameRepository.pendingGame.first() }
 
     /**
      * Ticks four players. The roster list is lazy, so rows below the fold don't exist
@@ -145,8 +166,13 @@ class MatchDayScreenTest {
         composeRule.onNodeWithText("MANUAL").assertExists()
 
         tap("Confirm ✓")
-        waitForText("Saving games arrives in the next milestone")
+        waitForText("Game saved. Recording results arrives next.")
         composeRule.onNodeWithText("Who's playing?").assertExists()
+
+        val saved = checkNotNull(pendingGame())
+        assertEquals(Selection.MANUAL, saved.selection)
+        assertEquals(2, saved.teamA.size)
+        assertEquals(2, saved.teamB.size)
     }
 
     @Test
@@ -162,6 +188,33 @@ class MatchDayScreenTest {
 
         tap("Continue →")
         tap("Teams uneven (3 v 1) — sure?")
-        waitForText("Saving games arrives in the next milestone")
+        waitForText("Game saved. Recording results arrives next.")
+    }
+
+    @Test
+    fun newPlayer_isPlacedByRankSavedAndTicked() {
+        showScreen()
+        composeRule.onNodeWithTag(ROSTER_LIST_TAG).performScrollToNode(hasText("+ New player"))
+        composeRule.onNode(hasSetTextAction() and hasText("+ New player")).performTextInput("Aurelio")
+        composeRule.onNodeWithText("Add").performClick()
+
+        // The sheet starts the new player in the middle: 8th of 15.
+        waitForText("Where do they fit?")
+        val row = composeRule.onNode(hasContentDescription("8. Aurelio, new player"))
+        val moveUp = row.fetchSemanticsNode().config[SemanticsActions.CustomActions].first { it.label == "Move up" }
+        composeRule.runOnIdle { moveUp.action() }
+        composeRule.onNode(hasContentDescription("7. Aurelio, new player")).assertExists()
+
+        tap("Save ✓")
+        composeRule.waitUntil(5_000) {
+            runBlocking { container.playerRepository.players.first() }.any { it.name == "Aurelio" }
+        }
+        composeRule.onNodeWithText("Where do they fit?").assertDoesNotExist()
+
+        // Saved, ticked and on the roster in name order (the first, from A to Z).
+        Espresso.closeSoftKeyboard()
+        composeRule.onNodeWithTag(ROSTER_LIST_TAG).performScrollToNode(hasText("Aurelio"))
+        composeRule.onNode(hasText("Aurelio") and isToggleable()).assertIsOn()
+        composeRule.onNodeWithText("1 selected").assertExists()
     }
 }
