@@ -1,5 +1,6 @@
 package io.github.valnrys.teambayes.matchday
 
+import io.github.valnrys.teambayes.data.Selection
 import io.github.valnrys.teambayes.engine.Rating
 import io.github.valnrys.teambayes.engine.Side
 import io.github.valnrys.teambayes.engine.WengLin
@@ -13,23 +14,9 @@ import io.github.valnrys.teambayes.engine.WengLin
 // (who moves where, when teams are ready, when to warn). The ViewModel only calls in.
 //
 // Players are referred to by id. Team A is always the Bibs and team B the Non-bibs.
+// How the teams were made (generated, edited or manual) is the storage layer's
+// [Selection], so the badge on the confirm step is exactly what gets saved.
 // ---------------------------------------------------------------------------------------
-
-/**
- * How a set of teams was made. The confirm step shows it as a badge, and once games are
- * saved it will be stored with each game, so we can later ask "do the balancer's teams
- * give closer games than hand-picked ones?".
- */
-enum class Selection {
-    /** A split the balancer proposed, untouched. */
-    GENERATED,
-
-    /** A proposed split that someone then moved players around in. */
-    EDITED,
-
-    /** Teams built by hand on the manual board, without the balancer. */
-    MANUAL,
-}
 
 /**
  * Teams that someone is editing by hand: a "working copy", separate from the balancer's

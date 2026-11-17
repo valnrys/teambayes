@@ -1,24 +1,45 @@
 package io.github.valnrys.teambayes.matchday
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SelectableDates
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.valnrys.teambayes.R
+import io.github.valnrys.teambayes.data.Selection
 import io.github.valnrys.teambayes.ui.theme.TeamBayesTheme
 import io.github.valnrys.teambayes.ui.theme.teamBayesColors
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 
 /**
  * "Confirm teams": a last look, with a badge saying how the teams were made.
@@ -26,8 +47,7 @@ import io.github.valnrys.teambayes.ui.theme.teamBayesColors
  * If the teams differ by more than one player the button turns amber and asks
  * "Teams uneven (6 v 4) — sure?". It's a nudge, not a lock: the button still works.
  *
- * Divergence from the original web version: there's no date field yet. Nothing is saved until the
- * next milestone, so a date would be thrown away; it arrives with storage.
+ * The date defaults to today; tap it to pick another, for a game entered late.
  *
  * The teams scroll if they're long; Back and Confirm are pinned below them.
  */
@@ -37,11 +57,18 @@ internal fun ConfirmStep(state: MatchDayUiState, actions: MatchDayActions, conte
     val warning = sizeWarning(chosen.teamA.size, chosen.teamB.size)
     StepLayout(
         contentPadding = contentPadding,
-        body = { ConfirmSummary(state, chosen) },
+        body = { ConfirmSummary(state, chosen, onDateChange = actions::setPlayDate) },
         footer = {
             ButtonRow {
-                GhostButton(stringResource(R.string.back), onClick = actions::back, modifier = Modifier.weight(1f))
-                if (warning == null) {
+                GhostButton(
+                    stringResource(R.string.back),
+                    onClick = actions::back,
+                    enabled = !state.saving,
+                    modifier = Modifier.weight(1f),
+                )
+                if (state.saving) {
+                    PrimaryButton(stringResource(R.string.saving), onClick = {}, enabled = false, modifier = Modifier.weight(1f))
+                } else if (warning == null) {
                     PrimaryButton(stringResource(R.string.confirm), onClick = actions::confirm, modifier = Modifier.weight(1f))
                 } else {
                     PrimaryButton(
@@ -57,9 +84,9 @@ internal fun ConfirmStep(state: MatchDayUiState, actions: MatchDayActions, conte
     )
 }
 
-/** The scrolling part of "Confirm teams": the title, the badge and both teams. */
+/** The scrolling part of "Confirm teams": the title, the badge, the date and both teams. */
 @Composable
-private fun ConfirmSummary(state: MatchDayUiState, chosen: ChosenTeams) {
+private fun ConfirmSummary(state: MatchDayUiState, chosen: ChosenTeams, onDateChange: (LocalDate) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -76,6 +103,8 @@ private fun ConfirmSummary(state: MatchDayUiState, chosen: ChosenTeams) {
             Badge(stringResource(chosen.selection.label()), MaterialTheme.colorScheme.primary)
         }
 
+        DateRow(date = state.playDate, today = state.today, enabled = !state.saving, onDateChange = onDateChange)
+
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             listOf(R.string.bibs to chosen.teamA, R.string.non_bibs to chosen.teamB).forEach { (label, ids) ->
                 val sideName = stringResource(label)
@@ -86,6 +115,75 @@ private fun ConfirmSummary(state: MatchDayUiState, chosen: ChosenTeams) {
         }
     }
 }
+
+/**
+ * "Date" and the day the game is played, such as "Tue, 17 Nov 2026", in the phone's own
+ * language and order. Tapping the row opens Material's date picker.
+ *
+ * **Dates and the picker.** The picker speaks in milliseconds at midnight UTC, so the day
+ * is turned into that and back using UTC, never the phone's time zone; otherwise the
+ * picker could show the day before. What gets stored is a different moment again: local
+ * noon on that day (see [toPlayedAt]).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateRow(date: LocalDate, today: LocalDate, enabled: Boolean, onDateChange: (LocalDate) -> Unit) {
+    var picking by rememberSaveable { mutableStateOf(false) }
+    val shown = remember(date) { date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)) }
+    val changeLabel = stringResource(R.string.change_date)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = MinTouchTarget)
+            // clickable also makes the row one TalkBack stop: "Date, Tue, 17 Nov 2026".
+            .clickable(enabled = enabled, onClickLabel = changeLabel, role = Role.Button) { picking = true },
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(stringResource(R.string.play_date), style = MaterialTheme.typography.bodyLarge)
+        Text(shown, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
+    }
+
+    if (picking) {
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = date.toUtcMidnightMillis(),
+            selectableDates = remember(today) { UpToToday(today) },
+        )
+        DatePickerDialog(
+            onDismissRequest = { picking = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pickerState.selectedDateMillis?.let { onDateChange(utcMidnightMillisToDate(it)) }
+                        picking = false
+                    },
+                ) { Text(stringResource(R.string.ok)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { picking = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        ) {
+            DatePicker(state = pickerState)
+        }
+    }
+}
+
+/**
+ * [today] and earlier only. Games are replayed in date order, so a game dated in the
+ * future would count after games that were really played before it. [today] comes from
+ * the ViewModel's clock, the same one that refuses a future date.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+private class UpToToday(private val today: LocalDate) : SelectableDates {
+    override fun isSelectableDate(utcTimeMillis: Long): Boolean = utcTimeMillis <= today.toUtcMidnightMillis()
+
+    override fun isSelectableYear(year: Int): Boolean = year <= today.year
+}
+
+/** The date picker's form of a day: milliseconds at midnight UTC. */
+private fun LocalDate.toUtcMidnightMillis(): Long = atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+
+private fun utcMidnightMillisToDate(millis: Long): LocalDate = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
 
 /** The badge word for each way of making teams. */
 private fun Selection.label(): Int = when (this) {

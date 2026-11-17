@@ -15,6 +15,17 @@ lifecycle = "2.11.0"
 core = "1.19.1"
 # https://github.com/Kotlin/kotlinx.coroutines/releases
 coroutines = "1.10.2"
+# Room 3 (package androidx.room3): KSP-only, coroutine-first. Latest stable 3.0.3.
+# https://developer.android.com/jetpack/androidx/releases/room3
+room = "3.0.3"
+# KSP 2.3+ is versioned on its own, no longer "<kotlin>-<ksp>". 2.3.14 is the latest release
+# and works with Kotlin 2.4.21 and AGP 9. https://github.com/google/ksp/releases
+ksp = "2.3.14"
+# Bundled SQLite driver: ships its own SQLite so every phone behaves the same.
+# https://developer.android.com/jetpack/androidx/releases/sqlite
+sqlite = "2.7.1"
+# Drag-to-reorder lists for Compose. Apache-2.0. https://github.com/Calvin-LL/Reorderable
+reorderable = "3.1.0"
 junit = "4.13.2"
 # https://developer.android.com/jetpack/androidx/releases/test
 androidx-test-runner = "1.7.0"
@@ -35,6 +46,13 @@ androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "core" }
 
+androidx-room-runtime = { module = "androidx.room3:room3-runtime", version.ref = "room" }
+androidx-room-compiler = { module = "androidx.room3:room3-compiler", version.ref = "room" }
+androidx-room-testing = { module = "androidx.room3:room3-testing", version.ref = "room" }
+androidx-sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sqlite" }
+
+reorderable = { module = "sh.calvin.reorderable:reorderable", version.ref = "reorderable" }
+
 junit = { module = "junit:junit", version.ref = "junit" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidx-test-runner" }
@@ -49,3 +67,5 @@ kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 # The Compose compiler ships with Kotlin, so it must match the Kotlin version.
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+androidx-room = { id = "androidx.room3", version.ref = "room" }

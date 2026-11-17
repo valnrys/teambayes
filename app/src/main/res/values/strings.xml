@@ -27,6 +27,17 @@
     <string name="generate_teams">Generate teams (%1$d) →</string>
     <string name="generating">Generating…</string>
 
+    <!-- "Where do they fit?" sheet, for a player added on match day -->
+    <string name="placement_heading">Where do they fit?</string>
+    <string name="placement_explainer">Drag %1$s to where they fit, best at the top. It only sets a starting point. Results take over after a few games.</string>
+    <string name="placement_row">%1$d. %2$s</string>
+    <string name="placement_new">New</string>
+    <string name="placement_new_row">%1$d. %2$s, new player</string>
+    <string name="move_up">Move up</string>
+    <string name="move_down">Move down</string>
+    <string name="save">Save ✓</string>
+    <string name="notice_player_save_failed">Couldn\'t save the player. Please try again.</string>
+
     <!-- Generate step -->
     <string name="pick_a_split">Pick a split</string>
     <string name="sampled_note">Large roster — sampled search used (still very close to optimal).</string>
@@ -63,11 +74,78 @@
     <string name="selection_manual">Manual</string>
     <string name="confirm">Confirm ✓</string>
     <string name="teams_uneven">Teams uneven (%1$d v %2$d) — sure?</string>
-    <string name="notice_saving_next_milestone">Saving games arrives in the next milestone</string>
+    <string name="play_date">Date</string>
+    <string name="change_date">change date</string>
+    <string name="ok">OK</string>
+    <string name="saving">Saving…</string>
+
+    <!-- Unfinished match day card -->
+    <string name="unfinished_heading">Unfinished match day</string>
+    <string name="unfinished_body">A pending game from %1$s is waiting for a result.</string>
+    <string name="resume">Resume →</string>
+    <string name="discard_unfinished_question">Discard this unfinished match day? Its teams and goals will be deleted.</string>
+    <string name="notice_discard_failed">Couldn\'t discard the game. Please try again.</string>
+
+    <!-- Record step -->
+    <string name="record_heading">Record result</string>
+    <string name="win_bibs">Win Bibs</string>
+    <string name="draw">Draw</string>
+    <string name="win_non_bibs">Win Non-bibs</string>
+    <string name="result_spoken_bibs">Result: Bibs winning, %1$d–%2$d</string>
+    <string name="result_spoken_non_bibs">Result: Non-bibs winning, %1$d–%2$d</string>
+    <string name="result_spoken_draw">Result: level, %1$d–%2$d</string>
+    <string name="bibs_score">Bibs score</string>
+    <string name="non_bibs_score">Non-bibs score</string>
+    <string name="adjust_score_off">Adjust score (own goals / unknown scorer)</string>
+    <string name="adjust_score_on">Adjust score: on — editing above</string>
+    <string name="goals_heading">Goals</string>
+    <string name="add_goal">Add a goal for %1$s</string>
+    <string name="remove_goal">Remove a goal from %1$s</string>
+    <plurals name="goal_count">
+        <item quantity="one">%1$s, %2$d goal</item>
+        <item quantity="other">%1$s, %2$d goals</item>
+    </plurals>
+    <string name="finalise_hint">Tally the goals, or turn on Adjust score for a 0–0.</string>
+    <string name="finalise">Finalise result ✓</string>
+    <string name="finalising">Submitting…</string>
+    <string name="notice_record_save_failed">Couldn\'t save that change. Please try again.</string>
+    <string name="notice_finalise_failed">Couldn\'t save the result. Please try again.</string>
+
+    <!-- Done step -->
+    <string name="result_bibs_won">Bibs won</string>
+    <string name="result_non_bibs_won">Non-bibs won</string>
+    <string name="result_draw">Draw</string>
+    <string name="score_line">%1$d – %2$d</string>
+    <string name="rating_movement">Rating movement</string>
+    <string name="movement_up">▲ +%1$d</string>
+    <string name="movement_down">▼ −%1$d</string>
+    <string name="movement_none">0</string>
+    <string name="movement_up_spoken">%1$s, Skill up %2$d</string>
+    <string name="movement_down_spoken">%1$s, Skill down %2$d</string>
+    <string name="movement_none_spoken">%1$s, Skill unchanged</string>
+    <string name="no_movement">No rating change data available.</string>
+    <string name="start_another">Start another match day</string>
+    <string name="notice_pending_game_exists">There\'s already an unfinished match day</string>
+    <string name="notice_game_save_failed">Couldn\'t save the game. Please try again.</string>
 
     <!-- Reasons the balancer can refuse -->
     <string name="problem_too_few">Generating teams needs at least 4 players. With fewer, make teams manually.</string>
     <string name="problem_too_many">Too many players selected. The most we can balance is 64.</string>
     <string name="problem_locks">Those locks can\'t all be met. Unlock someone and re-generate.</string>
     <string name="problem_unexpected">Something went wrong. Please try again.</string>
+    <!-- First run: add players, then rank them -->
+    <string name="first_run_add_heading">Add your players</string>
+    <string name="first_run_add_explainer">Add everyone who plays. You can add more later.</string>
+    <string name="first_run_name_label">Player name</string>
+    <string name="first_run_empty">No players yet.</string>
+    <string name="first_run_few_players_hint">Add at least 2 players to go on. Match day needs 4 to generate teams.</string>
+    <string name="first_run_match_day_hint">Match day needs 4 players to generate teams.</string>
+    <string name="first_run_next">Next →</string>
+    <string name="first_run_remove">Remove %1$s</string>
+    <string name="first_run_load_samples">Load sample players</string>
+    <string name="first_run_rank_heading">Put them in rough order</string>
+    <string name="first_run_rank_explainer">Drag the best player to the top. It only sets a starting point. Results take over after a few games.</string>
+    <string name="first_run_rank_row">%1$d. %2$s</string>
+    <string name="first_run_save">Save players ✓</string>
+    <string name="first_run_save_failed">Couldn\'t save the players. Please try again.</string>
 </resources>

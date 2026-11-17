@@ -175,7 +175,7 @@ icon opens. `setContent` hands that window to Compose, the code-based UI toolkit
 ```kotlin
 setContent {
     TeamBayesTheme {
-        MatchDayRoute()
+        TeamBayesApp(container)
     }
 }
 ```
@@ -199,7 +199,10 @@ takes values and reports events. `MatchDayRoute` holds the link to the ViewModel
 passes plain values down, with the ViewModel seen only as an interface of actions:
 
 ```kotlin
-fun MatchDayRoute(viewModel: MatchDayViewModel = viewModel()) {
+fun MatchDayRoute(
+    container: AppContainer,
+    viewModel: MatchDayViewModel = viewModel(factory = MatchDayViewModel.factory(container)),
+) {
     // collectAsStateWithLifecycle stops listening while the app is in the background.
     val state by viewModel.state.collectAsStateWithLifecycle()
     MatchDayScreen(state = state, actions = viewModel)
@@ -214,7 +217,7 @@ rebuilt. A `StateFlow` is a value you can watch: it always has a current value a
 watchers when it changes.
 
 ```kotlin
-private val _state = MutableStateFlow(MatchDayUiState(players.sortedBy { it.name.lowercase() }))
+private val _state = MutableStateFlow(MatchDayUiState(players = emptyList(), loading = true, playDate = today(), today = today()))
 val state: StateFlow<MatchDayUiState> = _state.asStateFlow()
 ```
 (Simplified: the doc comment between the lines is left out.) Private and writable
@@ -352,3 +355,134 @@ androidTestImplementation(libs.androidx.test.runner)
 (Simplified: other test libraries are left out.) Run them with `./gradlew test` and
 `./gradlew :app:connectedDebugAndroidTest`. See
 [app/build.gradle.kts](../app/build.gradle.kts).
+
+## Milestone 3: saving games
+
+This milestone stores players and games on the phone, so the app remembers the group,
+records results and survives being killed. The full tour is in
+[walkthrough/03-saving-games.md](walkthrough/03-saving-games.md).
+
+### Room: entities, DAOs and the database
+Room is Google's library over SQLite. An **entity** is a class that describes a table, a
+**DAO** (data access object) is an interface of queries, and a `@Database` class ties
+them together. Room writes the SQL plumbing for you and checks every query when the app
+builds.
+
+```kotlin
+@Entity(
+    tableName = "players",
+    indices = [Index(value = ["name"], unique = true)],
+)
+data class PlayerEntity(
+    @PrimaryKey val id: String,
+```
+(Simplified: the other columns are left out.) See
+[Entities.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/data/db/Entities.kt) and
+[Daos.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/data/db/Daos.kt).
+
+### KSP: code that writes code
+KSP (Kotlin Symbol Processing) is a compiler plugin that reads annotations such as
+`@Entity` and `@Dao` and generates Kotlin from them while the app builds. Room's code
+generator runs through it, which is why it's added with `ksp(...)` rather than
+`implementation(...)`:
+
+```kotlin
+ksp(libs.androidx.room.compiler)
+```
+The generated code never appears in the source tree, but it's real Kotlin, compiled with
+the rest. See [app/build.gradle.kts](../app/build.gradle.kts).
+
+### `Flow` from a database
+A DAO query can return a `Flow`. Room then re-runs it whenever a table it reads changes,
+and sends the new answer to whoever is collecting. Screens never ask "has anything
+changed?"; the change arrives.
+
+```kotlin
+override val players: Flow<List<StoredPlayer>> =
+    dao.observeAll().map { rows -> rows.map { it.toStoredPlayer() } }
+```
+`map` turns each answer from database rows into the app's own type on the way past. See
+[Players.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/data/Players.kt).
+
+### Transactions
+A transaction is a group of database statements that happens completely or not at all.
+If the phone dies half-way, the database rolls back to before it started:
+
+```kotlin
+database.withWriteTransaction {
+    // The appearances go with it: the foreign key cascades the delete.
+    games.getPending()?.let { games.deletePendingGame(it.id) }
+}
+```
+Every write in TeamBayes's repositories runs inside one, so a game is never saved without
+its players. See [Games.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/data/Games.kt).
+
+### The `Application` class
+Android creates one `Application` object per app process, before any screen, and keeps it
+until the process ends. It's the natural home for things the whole app shares, such as the
+database. The manifest names it with `android:name`.
+
+```kotlin
+override fun onCreate() {
+    super.onCreate()
+    container = createContainer()
+}
+```
+(Simplified: the class around it is left out.) See
+[TeamBayesApplication.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/TeamBayesApplication.kt).
+
+### `SavedStateHandle` in depth
+A ViewModel survives rotation, but not **process death**: Android killing a backgrounded
+app to free memory, then restarting it when the user comes back. A `SavedStateHandle` is
+a small bundle of plain values (strings, numbers, booleans, lists of strings) that Android
+keeps across that. Write the state into it on every change, and read it back when the
+ViewModel is created:
+
+```kotlin
+private fun change(transform: (FirstRunUiState) -> FirstRunUiState) {
+    val new = transform(_state.value)
+    _state.value = new
+    savedStateHandle[KEY_STEP] = new.step.name
+    savedStateHandle[KEY_NAMES] = ArrayList(new.names) // A Bundle can hold an ArrayList, not any List.
+```
+(Simplified: two more keys and the closing brace are left out.) Keep it small: ids and
+choices, not data that storage can give back. The ViewModel gets its handle from a factory
+calling `createSavedStateHandle()`. See
+[FirstRunViewModel.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/firstrun/FirstRunViewModel.kt).
+
+### `rememberSaveable`
+`remember` keeps a value across redraws. `rememberSaveable` also keeps it across rotation
+and process death, by putting it in the same kind of bundle. It suits small UI-only state
+that has no ViewModel, such as whether a date picker is open:
+
+```kotlin
+var picking by rememberSaveable { mutableStateOf(false) }
+```
+See [ConfirmStep.kt](../app/src/main/kotlin/io/github/valnrys/teambayes/matchday/ConfirmStep.kt).
+
+### A custom test runner
+Instrumented tests are started by a **test runner**, named in the build file. A custom one
+can change how the app starts under test. TeamBayes's swaps in a test `Application` whose
+database lives in memory, so no test can touch the phone's real data:
+
+```kotlin
+class TeamBayesTestRunner : AndroidJUnitRunner() {
+    override fun newApplication(classLoader: ClassLoader, className: String, context: Context): Application =
+        super.newApplication(classLoader, TestTeamBayesApplication::class.java.name, context)
+}
+```
+See [TeamBayesTestRunner.kt](../app/src/androidTest/kotlin/io/github/valnrys/teambayes/TeamBayesTestRunner.kt).
+
+### Which tests run where
+Room and SQLite need Android, so tests of the real database are **instrumented tests**: they
+run on a phone or emulator, each on a fresh in-memory database. Everything above storage,
+such as the ViewModels and the result rules, runs as **JVM tests** on the laptop against
+in-memory fakes, in seconds.
+
+```kotlin
+db = Room.inMemoryDatabaseBuilder(context, TeamBayesDatabase::class.java)
+    .setDriver(BundledSQLiteDriver())
+    .build()
+```
+An in-memory database disappears when it's closed, so each test starts empty. See
+[DatabaseTestSupport.kt](../app/src/androidTest/kotlin/io/github/valnrys/teambayes/data/DatabaseTestSupport.kt).

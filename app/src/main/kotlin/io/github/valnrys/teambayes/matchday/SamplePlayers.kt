@@ -15,7 +15,8 @@ import io.github.valnrys.teambayes.engine.Rating
 data class Player(val id: String, val name: String, val rating: Rating)
 
 /**
- * Made-up players, so match day has a roster worth searching before any storage exists.
+ * Made-up players, for tests, previews and first run's debug-only "Load sample players".
+ * The app itself never uses them: match day's roster comes from storage.
  *
  * Every name is invented; none belongs to a real player. The ratings come straight from
  * the engine: [Prior.fromRankOrder] spaces the means evenly from best to worst, and every
@@ -52,5 +53,5 @@ object SamplePlayers {
      * The id for the [number]th player: `p01`, `p02`, ... `p99`, then `p100`.
      * Not String.format: its output can depend on the phone's language.
      */
-    fun idFor(number: Int): String = "p" + number.toString().padStart(2, '0')
+    private fun idFor(number: Int): String = "p" + number.toString().padStart(2, '0')
 }
