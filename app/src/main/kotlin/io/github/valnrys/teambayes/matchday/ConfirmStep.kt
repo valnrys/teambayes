@@ -103,7 +103,7 @@ private fun ConfirmSummary(state: MatchDayUiState, chosen: ChosenTeams, onDateCh
             Badge(stringResource(chosen.selection.label()), MaterialTheme.colorScheme.primary)
         }
 
-        DateRow(date = state.playDate, enabled = !state.saving, onDateChange = onDateChange)
+        DateRow(date = state.playDate, today = state.today, enabled = !state.saving, onDateChange = onDateChange)
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             listOf(R.string.bibs to chosen.teamA, R.string.non_bibs to chosen.teamB).forEach { (label, ids) ->
@@ -127,7 +127,7 @@ private fun ConfirmSummary(state: MatchDayUiState, chosen: ChosenTeams, onDateCh
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DateRow(date: LocalDate, enabled: Boolean, onDateChange: (LocalDate) -> Unit) {
+private fun DateRow(date: LocalDate, today: LocalDate, enabled: Boolean, onDateChange: (LocalDate) -> Unit) {
     var picking by rememberSaveable { mutableStateOf(false) }
     val shown = remember(date) { date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)) }
     val changeLabel = stringResource(R.string.change_date)
@@ -147,7 +147,7 @@ private fun DateRow(date: LocalDate, enabled: Boolean, onDateChange: (LocalDate)
     if (picking) {
         val pickerState = rememberDatePickerState(
             initialSelectedDateMillis = date.toUtcMidnightMillis(),
-            selectableDates = UpToToday,
+            selectableDates = remember(today) { UpToToday(today) },
         )
         DatePickerDialog(
             onDismissRequest = { picking = false },
@@ -169,14 +169,15 @@ private fun DateRow(date: LocalDate, enabled: Boolean, onDateChange: (LocalDate)
 }
 
 /**
- * Today and earlier only. Games are replayed in date order, so a game dated in the future
- * would count after games that were really played before it.
+ * [today] and earlier only. Games are replayed in date order, so a game dated in the
+ * future would count after games that were really played before it. [today] comes from
+ * the ViewModel's clock, the same one that refuses a future date.
  */
 @OptIn(ExperimentalMaterial3Api::class)
-private object UpToToday : SelectableDates {
-    override fun isSelectableDate(utcTimeMillis: Long): Boolean = utcTimeMillis <= LocalDate.now().toUtcMidnightMillis()
+private class UpToToday(private val today: LocalDate) : SelectableDates {
+    override fun isSelectableDate(utcTimeMillis: Long): Boolean = utcTimeMillis <= today.toUtcMidnightMillis()
 
-    override fun isSelectableYear(year: Int): Boolean = year <= LocalDate.now().year
+    override fun isSelectableYear(year: Int): Boolean = year <= today.year
 }
 
 /** The date picker's form of a day: milliseconds at midnight UTC. */

@@ -78,7 +78,53 @@
     <string name="change_date">change date</string>
     <string name="ok">OK</string>
     <string name="saving">Saving…</string>
-    <string name="notice_game_saved">Game saved. Recording results arrives next.</string>
+
+    <!-- Unfinished match day card -->
+    <string name="unfinished_heading">Unfinished match day</string>
+    <string name="unfinished_body">A pending game from %1$s is waiting for a result.</string>
+    <string name="resume">Resume →</string>
+    <string name="discard_unfinished_question">Discard this unfinished match day? Its teams and goals will be deleted.</string>
+    <string name="notice_discard_failed">Couldn\'t discard the game. Please try again.</string>
+
+    <!-- Record step -->
+    <string name="record_heading">Record result</string>
+    <string name="win_bibs">Win Bibs</string>
+    <string name="draw">Draw</string>
+    <string name="win_non_bibs">Win Non-bibs</string>
+    <string name="result_spoken_bibs">Result: Bibs winning, %1$d–%2$d</string>
+    <string name="result_spoken_non_bibs">Result: Non-bibs winning, %1$d–%2$d</string>
+    <string name="result_spoken_draw">Result: level, %1$d–%2$d</string>
+    <string name="bibs_score">Bibs score</string>
+    <string name="non_bibs_score">Non-bibs score</string>
+    <string name="adjust_score_off">Adjust score (own goals / unknown scorer)</string>
+    <string name="adjust_score_on">Adjust score: on — editing above</string>
+    <string name="goals_heading">Goals</string>
+    <string name="add_goal">Add a goal for %1$s</string>
+    <string name="remove_goal">Remove a goal from %1$s</string>
+    <plurals name="goal_count">
+        <item quantity="one">%1$s, %2$d goal</item>
+        <item quantity="other">%1$s, %2$d goals</item>
+    </plurals>
+    <string name="finalise_hint">Tally the goals, or turn on Adjust score for a 0–0.</string>
+    <string name="finalise">Finalise result ✓</string>
+    <string name="finalising">Submitting…</string>
+    <string name="notice_record_save_failed">Couldn\'t save that change. Please try again.</string>
+    <string name="notice_finalise_failed">Couldn\'t save the result. Please try again.</string>
+
+    <!-- Done step -->
+    <string name="result_bibs_won">Bibs won</string>
+    <string name="result_non_bibs_won">Non-bibs won</string>
+    <string name="result_draw">Draw</string>
+    <string name="score_line">%1$d – %2$d</string>
+    <string name="rating_movement">Rating movement</string>
+    <string name="movement_up">▲ +%1$d</string>
+    <string name="movement_down">▼ −%1$d</string>
+    <string name="movement_none">0</string>
+    <string name="movement_up_spoken">%1$s, Skill up %2$d</string>
+    <string name="movement_down_spoken">%1$s, Skill down %2$d</string>
+    <string name="movement_none_spoken">%1$s, Skill unchanged</string>
+    <string name="no_movement">No rating change data available.</string>
+    <string name="start_another">Start another match day</string>
     <string name="notice_pending_game_exists">There\'s already an unfinished match day</string>
     <string name="notice_game_save_failed">Couldn\'t save the game. Please try again.</string>
 

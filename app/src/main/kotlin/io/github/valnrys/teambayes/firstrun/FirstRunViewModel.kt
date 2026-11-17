@@ -131,7 +131,8 @@ class FirstRunViewModel(
         change { it.copy(draft = text.take(MAX_NAME_LENGTH), duplicateName = null) }
 
     /**
-     * Adds the typed name, without spaces at the ends. Blank names are ignored. A name that
+     * Adds the typed name, tidied by `normaliseName` (one Unicode form, no spaces at the ends,
+     * inner runs of spaces made one). Blank names are ignored. A name that
      * is already there, ignoring upper and lower case, is refused with a message, so two
      * "Sam"s can't be confused on the pitch.
      */

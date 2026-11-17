@@ -21,6 +21,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.valnrys.teambayes.AppContainer
 import io.github.valnrys.teambayes.R
+import io.github.valnrys.teambayes.data.Team
 import io.github.valnrys.teambayes.engine.Side
 import io.github.valnrys.teambayes.ui.theme.teamBayesColors
 import java.time.LocalDate
@@ -51,6 +52,15 @@ interface MatchDayActions {
     fun continueToConfirm()
     fun setPlayDate(date: LocalDate)
     fun confirm()
+    fun resumeUnfinished()
+    fun discardUnfinished()
+    fun keepUnfinished()
+    fun confirmDiscardUnfinished()
+    fun changeGoals(playerId: String, change: Int)
+    fun toggleAdjustScore()
+    fun setTypedScore(team: Team, text: String)
+    fun finalise()
+    fun startAnotherMatchDay()
     fun noticeShown()
     fun back()
 }
@@ -75,6 +85,15 @@ object NoActions : MatchDayActions {
     override fun continueToConfirm() = Unit
     override fun setPlayDate(date: LocalDate) = Unit
     override fun confirm() = Unit
+    override fun resumeUnfinished() = Unit
+    override fun discardUnfinished() = Unit
+    override fun keepUnfinished() = Unit
+    override fun confirmDiscardUnfinished() = Unit
+    override fun changeGoals(playerId: String, change: Int) = Unit
+    override fun toggleAdjustScore() = Unit
+    override fun setTypedScore(team: Team, text: String) = Unit
+    override fun finalise() = Unit
+    override fun startAnotherMatchDay() = Unit
     override fun noticeShown() = Unit
     override fun back() = Unit
 }
@@ -100,7 +119,7 @@ fun MatchDayRoute(
 }
 
 /**
- * Match day: roster → pick a split (or the manual board) → confirm.
+ * Match day: roster → pick a split (or the manual board) → confirm → record → done.
  *
  * Stateless: it draws [state] and reports taps through [actions]. One step shows at a
  * time, chosen by [MatchDayUiState.step]; the "Where do they fit?" sheet, the "Discard
@@ -136,27 +155,41 @@ fun MatchDayScreen(state: MatchDayUiState, actions: MatchDayActions, modifier: M
             Step.GENERATE -> PickSplitStep(state, actions, innerPadding)
             Step.MANUAL -> ManualStep(state, actions, innerPadding)
             Step.CONFIRM -> ConfirmStep(state, actions, innerPadding)
+            Step.RECORD -> RecordStep(state, actions, innerPadding)
+            Step.DONE -> DoneStep(state, actions, innerPadding)
         }
     }
 
     state.placing?.let { PlacementSheet(state, it, actions) }
 
     if (state.discardPrompt != null) {
-        DiscardDialog(onDiscard = actions::confirmDiscard, onCancel = actions::dismissDiscard)
+        DiscardDialog(
+            message = stringResource(R.string.discard_edits),
+            onDiscard = actions::confirmDiscard,
+            onCancel = actions::dismissDiscard,
+        )
+    }
+    if (state.discardGamePrompt) {
+        DiscardDialog(
+            message = stringResource(R.string.discard_unfinished_question),
+            onDiscard = actions::confirmDiscardUnfinished,
+            onCancel = actions::keepUnfinished,
+        )
     }
 }
 
 /**
- * "Discard your edits?" with Cancel and a red Discard, as in the original web version.
+ * A question such as "Discard your edits?" with Cancel and a red Discard, as in the
+ * original web version.
  *
  * A standard Material dialog, so TalkBack announces it and moves focus into it, and
  * back or tapping outside counts as Cancel.
  */
 @Composable
-private fun DiscardDialog(onDiscard: () -> Unit, onCancel: () -> Unit) {
+private fun DiscardDialog(message: String, onDiscard: () -> Unit, onCancel: () -> Unit) {
     AlertDialog(
         onDismissRequest = onCancel,
-        text = { Text(stringResource(R.string.discard_edits), style = MaterialTheme.typography.bodyLarge) },
+        text = { Text(message, style = MaterialTheme.typography.bodyLarge) },
         dismissButton = {
             TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
         },

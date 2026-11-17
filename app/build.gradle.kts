@@ -28,7 +28,9 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "0.1.0"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Runs instrumented tests with an in-memory database, never the real one: see
+        // TeamBayesTestRunner in src/androidTest.
+        testInstrumentationRunner = "io.github.valnrys.teambayes.TeamBayesTestRunner"
     }
 
     // Java 17 bytecode, matching :engine. Kotlin follows this setting automatically.

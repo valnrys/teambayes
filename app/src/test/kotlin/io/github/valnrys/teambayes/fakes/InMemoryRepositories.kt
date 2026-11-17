@@ -3,6 +3,7 @@ package io.github.valnrys.teambayes.fakes
 import io.github.valnrys.teambayes.data.DuplicateNameException
 import io.github.valnrys.teambayes.data.FinalGame
 import io.github.valnrys.teambayes.data.GameRepository
+import io.github.valnrys.teambayes.data.NoPendingGameException
 import io.github.valnrys.teambayes.data.PendingGame
 import io.github.valnrys.teambayes.data.PendingGameExistsException
 import io.github.valnrys.teambayes.data.PlayerGoals
@@ -15,7 +16,10 @@ import io.github.valnrys.teambayes.engine.Outcome
 import io.github.valnrys.teambayes.engine.Prior
 import io.github.valnrys.teambayes.matchday.Player
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.StateFlow
 
 // Repositories that keep everything in memory, so ViewModel tests run on the laptop
@@ -74,9 +78,10 @@ class InMemoryPlayerRepository(
 }
 
 /**
- * Games in memory. Only what match day uses so far is filled in.
+ * Games in memory, following the real repository's rules: one pending game at a time,
+ * goals never negative, and finalising moves the pending game to [finalGames].
  *
- * @param finalGames finished games, for ratings.
+ * @param finalGames finished games at the start, for ratings.
  */
 class InMemoryGameRepository(finalGames: List<FinalGame> = emptyList()) : GameRepository {
 
@@ -89,9 +94,49 @@ class InMemoryGameRepository(finalGames: List<FinalGame> = emptyList()) : GameRe
     /** If set, [savePending] waits for it, so a test can act while a save is running. */
     var gate: CompletableDeferred<Unit>? = null
 
+    /** Each successful [finalise] call's winner and score, in order. */
+    val finalised = mutableListOf<Triple<Outcome, Int, Int>>()
+
+    /** If true, [finalise] throws, like a write that fails. */
+    var failFinalise = false
+
+    /** If true, [setGoals] and [setScoreOverride] throw, like a write that fails. */
+    var failRecordWrites = false
+
+    /** How many of the next [setGoals] and [setScoreOverride] calls throw. */
+    var failNextRecordWrites = 0
+
+    /** How many of the next reads of [pendingGame] throw, like a read that fails. */
+    var failNextReads = 0
+
+    /** If true, [discardPending] throws. */
+    var failDiscard = false
+
+    /**
+     * If set, [setGoals], [setScoreOverride] and [discardPending] wait for it, so a test
+     * can act while one of those writes is still running.
+     */
+    var writeGate: CompletableDeferred<Unit>? = null
+
     private val pending = MutableStateFlow<PendingGame?>(null)
-    override val pendingGame: StateFlow<PendingGame?> = pending
-    override val finalGames: StateFlow<List<FinalGame>> = MutableStateFlow(finalGames)
+
+    override val pendingGame: Flow<PendingGame?> = flow {
+        if (failNextReads > 0) {
+            failNextReads--
+            error("Read failed")
+        }
+        emitAll(pending)
+    }
+
+    /** The pending game stored right now, for tests to check. */
+    val pendingNow: PendingGame? get() = pending.value
+    private val finals = MutableStateFlow(finalGames)
+    override val finalGames: StateFlow<List<FinalGame>> = finals
+
+    /** Puts [game] in storage as the pending game, as if saved in an earlier session. */
+    fun seedPending(game: PendingGame) {
+        pending.value = game
+    }
 
     override suspend fun savePending(
         playedAt: Long,
@@ -115,12 +160,53 @@ class InMemoryGameRepository(finalGames: List<FinalGame> = emptyList()) : GameRe
         return id
     }
 
-    override suspend fun setGoals(playerId: String, goals: Int) = notYet()
-    override suspend fun setScoreOverride(score: Score?) = notYet()
-    override suspend fun finalise(winner: Outcome, scoreA: Int, scoreB: Int): String = notYet()
-    override suspend fun discardPending() {
-        pending.value = null
+    override suspend fun setGoals(playerId: String, goals: Int) {
+        writeGate?.await()
+        failIfAsked()
+        require(goals >= 0)
+        val game = pending.value ?: throw NoPendingGameException()
+        require(playerId in (game.teamA + game.teamB).map { it.playerId }) { "$playerId is not in the game" }
+        fun List<PlayerGoals>.with() = map { if (it.playerId == playerId) it.copy(goals = goals) else it }
+        pending.value = game.copy(teamA = game.teamA.with(), teamB = game.teamB.with())
     }
 
-    private fun notYet(): Nothing = throw UnsupportedOperationException("Match day doesn't record results yet")
+    override suspend fun setScoreOverride(score: Score?) {
+        writeGate?.await()
+        failIfAsked()
+        val game = pending.value ?: throw NoPendingGameException()
+        pending.value = game.copy(scoreOverride = score)
+    }
+
+    override suspend fun finalise(winner: Outcome, scoreA: Int, scoreB: Int): String {
+        check(!failFinalise) { "Finalise failed" }
+        val game = pending.value ?: throw NoPendingGameException()
+        finalised += Triple(winner, scoreA, scoreB)
+        finals.value = finals.value + FinalGame(
+            id = game.id,
+            playedAt = game.playedAt,
+            createdAt = game.createdAt,
+            selection = game.selection,
+            outcome = winner,
+            scoreA = scoreA,
+            scoreB = scoreB,
+            teamA = game.teamA,
+            teamB = game.teamB,
+        )
+        pending.value = null
+        return game.id
+    }
+
+    private fun failIfAsked() {
+        check(!failRecordWrites) { "Write failed" }
+        if (failNextRecordWrites > 0) {
+            failNextRecordWrites--
+            error("Write failed")
+        }
+    }
+
+    override suspend fun discardPending() {
+        writeGate?.await()
+        check(!failDiscard) { "Discard failed" }
+        pending.value = null
+    }
 }

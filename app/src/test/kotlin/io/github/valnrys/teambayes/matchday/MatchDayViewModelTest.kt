@@ -4,6 +4,9 @@ import androidx.lifecycle.SavedStateHandle
 import io.github.valnrys.teambayes.R
 import io.github.valnrys.teambayes.data.FinalGame
 import io.github.valnrys.teambayes.data.PlayerGoals
+import io.github.valnrys.teambayes.data.Team
+import io.github.valnrys.teambayes.data.Score
+import io.github.valnrys.teambayes.data.PendingGame
 import io.github.valnrys.teambayes.data.RatingsRepository
 import io.github.valnrys.teambayes.data.Selection
 import io.github.valnrys.teambayes.data.StoredPlayer
@@ -620,12 +623,10 @@ class MatchDayViewModelTest {
 
         vm.continueToConfirm()
         vm.confirm()
-        assertEquals(Step.ROSTER, vm.now.step)
-        assertEquals(R.string.notice_game_saved, vm.now.notice)
+        assertEquals(Step.RECORD, vm.now.step)
+        assertNull(vm.now.notice)
         assertNull(vm.now.workingCopy)
         assertEquals(10, vm.now.selectedIds.size)
-        vm.noticeShown()
-        assertNull(vm.now.notice)
     }
 
     @Test
@@ -704,7 +705,7 @@ class MatchDayViewModelTest {
         assertEquals(today, vm.now.playDate)
 
         gate.complete(Unit)
-        assertEquals(Step.ROSTER, vm.now.step)
+        assertEquals(Step.RECORD, vm.now.step)
         assertEquals(today.toPlayedAt(clock.zone), gameRepository.savedPending.single().playedAt)
     }
 
@@ -964,5 +965,537 @@ class MatchDayViewModelTest {
         val board = WorkingCopy(Selection.MANUAL, ids.take(2), ids.drop(2))
         val manual = confirmOnly.copy(chosen = chosen.copy(selection = Selection.MANUAL), workingCopy = board)
         assertEquals(Step.CONFIRM, manual.restore(players).step)
+    }
+
+    // ---- Record result --------------------------------------------------------------------
+
+    /** A ViewModel on the record step of a 2 v 2 game it just confirmed by hand. */
+    private fun TestScope.recording(): MatchDayViewModel = viewModel(4).apply {
+        makeTeamsManually()
+        movePlayer(players[0].id); movePlayer(players[1].id) // → Bibs
+        movePlayer(players[2].id); movePlayer(players[2].id) // → Non-bibs
+        movePlayer(players[3].id); movePlayer(players[3].id)
+        continueToConfirm()
+        confirm()
+    }
+
+    private val bib get() = players[0].id
+    private val otherBib get() = players[1].id
+    private val nonBib get() = players[2].id
+
+    @Test
+    fun confirm_goesStraightToRecordWithTheSavedTeamsAndNoGoals() = runTest(mainDispatcher) {
+        val vm = recording()
+        val recording = vm.now.recording!!
+        assertEquals(Step.RECORD, vm.now.step)
+        assertEquals(gameRepository.pendingNow!!.id, recording.gameId)
+        assertEquals(listOf(bib, otherBib), recording.teamA)
+        assertEquals(listOf(nonBib, players[3].id), recording.teamB)
+        assertTrue(recording.goals.isEmpty())
+        assertFalse(recording.adjusted)
+        assertFalse("A game on record isn't offered as unfinished", vm.now.showPendingCard)
+    }
+
+    @Test
+    fun goals_areStoredOnEveryTapAndNeverGoBelowZero() = runTest(mainDispatcher) {
+        val vm = recording()
+        vm.changeGoals(bib, +1)
+        vm.changeGoals(bib, +1)
+        vm.changeGoals(nonBib, +1)
+        vm.changeGoals(nonBib, -1)
+        vm.changeGoals(nonBib, -1) // already 0
+        vm.changeGoals("stranger", +1) // not in this game
+
+        assertEquals(mapOf(bib to 2, nonBib to 0), vm.now.recording!!.goals)
+        val stored = gameRepository.pendingNow!!
+        assertEquals(2, stored.teamA.single { it.playerId == bib }.goals)
+        assertEquals(0, stored.teamB.single { it.playerId == nonBib }.goals)
+    }
+
+    @Test
+    fun result_followsTheGoals() = runTest(mainDispatcher) {
+        val vm = recording()
+        assertEquals(MatchResult(0, 0, Outcome.DRAW), vm.now.recording!!.result)
+        vm.changeGoals(bib, +1)
+        vm.changeGoals(otherBib, +1)
+        vm.changeGoals(nonBib, +1)
+        assertEquals(MatchResult(2, 1, Outcome.A_WINS), vm.now.recording!!.result)
+    }
+
+    @Test
+    fun finalise_isBlockedUntilAGoalIsTallied() = runTest(mainDispatcher) {
+        val vm = recording()
+        assertFalse(vm.now.recording!!.canFinalise)
+        vm.finalise()
+        assertEquals(Step.RECORD, vm.now.step)
+        assertTrue(gameRepository.finalised.isEmpty())
+
+        vm.changeGoals(nonBib, +1)
+        assertTrue(vm.now.recording!!.canFinalise)
+    }
+
+    @Test
+    fun adjustScore_seedsTheTallyStoresTheTypedScoreAndDecidesTheWinner() = runTest(mainDispatcher) {
+        val vm = recording()
+        vm.changeGoals(bib, +1)
+        vm.changeGoals(bib, +1)
+
+        vm.toggleAdjustScore()
+        var recording = vm.now.recording!!
+        assertTrue(recording.adjusted)
+        assertEquals("2" to "0", recording.typedA to recording.typedB)
+        assertEquals(Score(2, 0), gameRepository.pendingNow!!.scoreOverride)
+
+        // An own goal for the Non-bibs, twice: 2–2.
+        vm.setTypedScore(Team.B, "2x")
+        recording = vm.now.recording!!
+        assertEquals("2", recording.typedB)
+        assertEquals(MatchResult(2, 2, Outcome.DRAW), recording.result)
+        assertEquals(Score(2, 2), gameRepository.pendingNow!!.scoreOverride)
+
+        // Off again: back to the tally, and the stored override is cleared.
+        vm.toggleAdjustScore()
+        assertEquals(MatchResult(2, 0, Outcome.A_WINS), vm.now.recording!!.result)
+        assertNull(gameRepository.pendingNow!!.scoreOverride)
+    }
+
+    @Test
+    fun adjustScore_allowsATyped0to0() = runTest(mainDispatcher) {
+        val vm = recording()
+        vm.toggleAdjustScore()
+        assertTrue(vm.now.recording!!.canFinalise)
+        vm.finalise()
+        assertEquals(listOf(Triple(Outcome.DRAW, 0, 0)), gameRepository.finalised)
+    }
+
+    @Test
+    fun typedScore_isIgnoredUnlessAdjusting() = runTest(mainDispatcher) {
+        val vm = recording()
+        vm.setTypedScore(Team.A, "5")
+        assertEquals("", vm.now.recording!!.typedA)
+        assertNull(gameRepository.pendingNow!!.scoreOverride)
+    }
+
+    @Test
+    fun finalise_storesTheResultAndShowsTheMovement() = runTest(mainDispatcher) {
+        val vm = recording()
+        vm.changeGoals(nonBib, +1)
+        vm.finalise()
+
+        assertEquals(listOf(Triple(Outcome.B_WINS, 0, 1)), gameRepository.finalised)
+        assertNull(gameRepository.pendingNow)
+        assertEquals(Step.DONE, vm.now.step)
+        val finished = vm.now.finished!!
+        assertEquals(MatchResult(0, 1, Outcome.B_WINS), finished.result)
+        val movements = finished.movements
+        assertEquals(4, movements.size)
+        assertEquals(movements.map { it.change }.sortedDescending(), movements.map { it.change })
+        // The winners went up, the losers down.
+        val byId = movements.associate { it.playerId to it.change }
+        assertTrue(byId.getValue(nonBib) > 0)
+        assertTrue(byId.getValue(bib) < 0)
+    }
+
+    @Test
+    fun finalise_thatFailsStaysOnRecordWithAMessage() = runTest(mainDispatcher) {
+        gameRepository.failFinalise = true
+        val vm = recording()
+        vm.changeGoals(bib, +1)
+        vm.finalise()
+        assertEquals(Step.RECORD, vm.now.step)
+        assertFalse(vm.now.recording!!.finalising)
+        assertEquals(R.string.notice_finalise_failed, vm.now.notice)
+    }
+
+    @Test
+    fun startAnotherMatchDay_isAnEmptyRoster() = runTest(mainDispatcher) {
+        val vm = recording()
+        vm.changeGoals(bib, +1)
+        vm.finalise()
+        vm.startAnotherMatchDay()
+
+        assertEquals(Step.ROSTER, vm.now.step)
+        assertTrue(vm.now.selectedIds.isEmpty())
+        assertNull(vm.now.finished)
+        assertNull(vm.now.recording)
+        assertFalse(vm.now.showPendingCard)
+    }
+
+    @Test
+    fun back_fromRecordKeepsTheGameAndOffersItOnTheRoster() = runTest(mainDispatcher) {
+        val vm = recording()
+        vm.changeGoals(bib, +1)
+        vm.back()
+
+        assertEquals(Step.ROSTER, vm.now.step)
+        assertTrue(vm.now.showPendingCard)
+        assertEquals(1, gameRepository.pendingNow!!.teamA.single { it.playerId == bib }.goals)
+    }
+
+    @Test
+    fun movementsFrom_isSkillAfterMinusSkillBeforeBiggestRiseFirst() {
+        val sigma = EngineConfig.SIGMA0
+        val changes = mapOf(
+            "a" to (Rating(25.0, sigma) to Rating(26.0, sigma)), // +40
+            "b" to (Rating(25.0, sigma) to Rating(25.0, sigma)), // 0
+            "c" to (Rating(25.0, sigma) to Rating(24.5, sigma)), // -20
+            "d" to (Rating(25.0, sigma) to Rating(25.0, sigma - 0.25)), // +20: less doubt
+        )
+        val movements = movementsFrom(changes, mapOf("a" to "Ann", "b" to "Bo", "c" to "Cy", "d" to "Di"))
+        assertEquals(listOf("a" to 40, "d" to 20, "b" to 0, "c" to -20), movements.map { it.playerId to it.change })
+    }
+
+    // ---- Unfinished match day --------------------------------------------------------------
+
+    /** A pending game from 10 November, Bibs [bib] (2 goals) and [otherBib] v the next two. */
+    private fun seedPending(scoreOverride: Score? = null) = gameRepository.seedPending(
+        PendingGame(
+            id = "earlier",
+            playedAt = LocalDate.of(2026, 11, 10).toPlayedAt(clock.zone),
+            createdAt = 0,
+            selection = Selection.GENERATED,
+            teamA = listOf(PlayerGoals(players[0].id, 2), PlayerGoals(players[1].id, 0)),
+            teamB = listOf(PlayerGoals(players[2].id, 1), PlayerGoals(players[3].id, 0)),
+            scoreOverride = scoreOverride,
+        ),
+    )
+
+    @Test
+    fun pendingGame_showsTheCardWithItsDate() {
+        seedPending()
+        val vm = newViewModel()
+        assertTrue(vm.now.showPendingCard)
+        assertEquals(LocalDate.of(2026, 11, 10), vm.now.pendingGameDate)
+    }
+
+    @Test
+    fun resume_opensRecordWithTheStoredGoalsAndAdjustedScore() {
+        seedPending(scoreOverride = Score(3, 1))
+        val vm = newViewModel()
+        vm.resumeUnfinished()
+
+        val recording = vm.now.recording!!
+        assertEquals(Step.RECORD, vm.now.step)
+        assertEquals("earlier", recording.gameId)
+        assertEquals(2, recording.goals[players[0].id])
+        assertEquals(1, recording.goals[players[2].id])
+        assertTrue(recording.adjusted)
+        assertEquals(MatchResult(3, 1, Outcome.A_WINS), recording.result)
+    }
+
+    @Test
+    fun discard_asksFirstAndCancelKeepsTheGame() {
+        seedPending()
+        val vm = newViewModel()
+        vm.discardUnfinished()
+        assertTrue(vm.now.discardGamePrompt)
+        assertNotNull("Nothing deleted before the answer", gameRepository.pendingNow)
+
+        vm.keepUnfinished()
+        assertFalse(vm.now.discardGamePrompt)
+        assertNotNull(gameRepository.pendingNow)
+        assertTrue(vm.now.showPendingCard)
+    }
+
+    @Test
+    fun discard_confirmedDeletesTheGameAndClearsTheTicks() {
+        seedPending()
+        val vm = newViewModel()
+        vm.toggleSelected(players[5].id)
+        vm.discardUnfinished()
+        vm.confirmDiscardUnfinished()
+
+        assertNull(gameRepository.pendingNow)
+        assertFalse(vm.now.showPendingCard)
+        assertTrue(vm.now.selectedIds.isEmpty())
+    }
+
+    @Test
+    fun confirmDiscardUnfinished_withoutTheDialogDoesNothing() {
+        seedPending()
+        val vm = newViewModel()
+        vm.confirmDiscardUnfinished()
+        assertNotNull(gameRepository.pendingNow)
+    }
+
+    // ---- Process death on the result steps ------------------------------------------------
+
+    @Test
+    fun processDeath_onRecordComesBackOnRecordWithEveryGoal() = runTest(mainDispatcher) {
+        val vm = recording()
+        vm.changeGoals(bib, +1)
+        vm.changeGoals(bib, +1)
+        vm.toggleAdjustScore()
+        vm.setTypedScore(Team.B, "") // cleared, so it reads 0 but shows blank
+
+        val restored = newViewModel().now
+
+        assertEquals(Step.RECORD, restored.step)
+        val recording = restored.recording!!
+        assertEquals(2, recording.goals[bib])
+        assertTrue(recording.adjusted)
+        assertEquals("2" to "", recording.typedA to recording.typedB)
+        assertFalse(restored.showPendingCard)
+    }
+
+    @Test
+    fun processDeath_onRecordWhenTheGameHasGoneLandsOnTheRoster() = runTest(mainDispatcher) {
+        recording()
+        gameRepository.discardPending()
+
+        val restored = newViewModel().now
+
+        assertEquals(Step.ROSTER, restored.step)
+        assertNull(restored.recording)
+    }
+
+    @Test
+    fun processDeath_onDoneComesBackOnDone() = runTest(mainDispatcher) {
+        val vm = recording()
+        vm.changeGoals(bib, +1)
+        vm.finalise()
+        val finished = vm.now.finished
+
+        val restored = newViewModel().now
+
+        assertEquals(Step.DONE, restored.step)
+        assertEquals(finished, restored.finished)
+    }
+
+    // ---- Taps racing storage -----------------------------------------------------------------
+
+    @Test
+    fun aFailedGoalWrite_isUndoneOnScreenAndSaid() = runTest(mainDispatcher) {
+        val vm = recording()
+        vm.changeGoals(bib, +1)
+        gameRepository.failRecordWrites = true
+        vm.changeGoals(bib, +1)
+
+        assertEquals("The screen shows what's stored", 1, vm.now.recording!!.goals[bib])
+        assertEquals(R.string.notice_record_save_failed, vm.now.notice)
+    }
+
+    @Test
+    fun finalise_refusesWhenStorageDiffersFromTheScreen_thenSavesWhatsStoredOnTheNextTap() = runTest(mainDispatcher) {
+        val vm = recording()
+        vm.changeGoals(bib, +1) // stored
+        val gate = CompletableDeferred<Unit>()
+        gameRepository.writeGate = gate
+        gameRepository.failRecordWrites = true
+        vm.changeGoals(bib, +1) // waiting, and will fail
+        vm.finalise() // queued behind it, with 2–0 on screen
+
+        gate.complete(Unit)
+
+        assertTrue("Nothing finalised with a score storage doesn't have", gameRepository.finalised.isEmpty())
+        assertEquals(Step.RECORD, vm.now.step)
+        assertFalse(vm.now.recording!!.finalising)
+        assertEquals(1, vm.now.recording!!.goals[bib])
+
+        gameRepository.writeGate = null
+        gameRepository.failRecordWrites = false
+        vm.finalise()
+        assertEquals(listOf(Triple(Outcome.A_WINS, 1, 0)), gameRepository.finalised)
+    }
+
+    @Test
+    fun backThenResume_whileAGoalIsBeingStored_showsTheStoredCount() = runTest(mainDispatcher) {
+        val vm = recording()
+        val gate = CompletableDeferred<Unit>()
+        gameRepository.writeGate = gate
+        vm.changeGoals(bib, +1) // still being written
+        vm.back()
+        vm.resumeUnfinished() // waits for the write
+
+        gate.complete(Unit)
+
+        assertEquals(Step.RECORD, vm.now.step)
+        assertEquals(1, vm.now.recording!!.goals[bib])
+    }
+
+    @Test
+    fun discard_hidesTheCardAtOnceAndKeepsTicksMadeMeanwhile() = runTest(mainDispatcher) {
+        seedPending()
+        val vm = newViewModel()
+        vm.toggleSelected(players[6].id)
+        val gate = CompletableDeferred<Unit>()
+        gameRepository.writeGate = gate
+        vm.discardUnfinished()
+        vm.confirmDiscardUnfinished()
+
+        assertFalse("The card goes before the delete finishes", vm.now.showPendingCard)
+        assertTrue("Ticks clear at once", vm.now.selectedIds.isEmpty())
+        vm.toggleSelected(players[5].id) // while the delete runs
+        vm.resumeUnfinished() // too late: the card has gone
+
+        gate.complete(Unit)
+
+        assertNull(gameRepository.pendingNow)
+        assertEquals(setOf(players[5].id), vm.now.selectedIds)
+        assertEquals(Step.ROSTER, vm.now.step)
+        assertNull(vm.now.recording)
+    }
+
+    @Test
+    fun discard_thatFailsBringsTheCardBackWithAMessage() {
+        seedPending()
+        gameRepository.failDiscard = true
+        val vm = newViewModel()
+        vm.discardUnfinished()
+        vm.confirmDiscardUnfinished()
+
+        assertNotNull(gameRepository.pendingNow)
+        assertTrue(vm.now.showPendingCard)
+        assertEquals(R.string.notice_discard_failed, vm.now.notice)
+    }
+
+    @Test
+    fun confirm_waitsForADiscardStillRunning() = runTest(mainDispatcher) {
+        seedPending()
+        val vm = newViewModel()
+        val gate = CompletableDeferred<Unit>()
+        gameRepository.writeGate = gate
+        vm.discardUnfinished()
+        vm.confirmDiscardUnfinished() // still deleting
+        players.take(4).forEach { vm.toggleSelected(it.id) }
+        vm.generate()
+        advanceUntilIdle()
+        vm.continueToConfirm()
+        vm.confirm() // must not meet the old game
+
+        gate.complete(Unit)
+
+        assertEquals(Step.RECORD, vm.now.step)
+        assertEquals(1, gameRepository.savedPending.size)
+        assertNull(vm.now.notice)
+    }
+
+    @Test
+    fun setTypedScore_keepsOnlyAsciiDigits() = runTest(mainDispatcher) {
+        val vm = recording()
+        vm.toggleAdjustScore()
+        vm.setTypedScore(Team.A, "٣4") // an Arabic-Indic three, then a 4
+        assertEquals("4", vm.now.recording!!.typedA)
+    }
+
+    // ---- Finalise trusts storage, not the screen -------------------------------------------
+
+    @Test
+    fun finalise_whenAWriteFailedWithAnotherQueuedBehindIt_savesNothingAndShowsStorage() = runTest(mainDispatcher) {
+        val vm = recording()
+        vm.changeGoals(bib, +1) // stored: 1–0
+        val gate = CompletableDeferred<Unit>()
+        gameRepository.writeGate = gate
+        gameRepository.failNextRecordWrites = 1
+        vm.changeGoals(bib, +1) // will fail
+        vm.changeGoals(nonBib, +1) // queued behind it, will succeed
+        vm.finalise() // the screen says 2–1
+
+        gate.complete(Unit)
+
+        assertTrue("2–1 isn't what's stored", gameRepository.finalised.isEmpty())
+        assertEquals(R.string.notice_record_save_failed, vm.now.notice)
+        val recording = vm.now.recording!!
+        assertFalse(recording.finalising)
+        assertEquals(MatchResult(1, 1, Outcome.DRAW), recording.result) // what storage holds
+
+        gameRepository.writeGate = null
+        vm.finalise()
+        assertEquals(listOf(Triple(Outcome.DRAW, 1, 1)), gameRepository.finalised)
+    }
+
+    @Test
+    fun finalise_whenAFailedWritesResyncAlsoFailed_stillSavesNothingWrong() = runTest(mainDispatcher) {
+        val vm = recording()
+        vm.changeGoals(bib, +1) // stored: 1–0
+        gameRepository.failNextRecordWrites = 1
+        gameRepository.failNextReads = 1 // the resync after the failure can't read either
+        vm.changeGoals(bib, +1)
+        assertEquals("The screen is still wrong", 2, vm.now.recording!!.goals[bib])
+
+        vm.finalise()
+
+        assertTrue(gameRepository.finalised.isEmpty())
+        assertEquals(1, vm.now.recording!!.goals[bib])
+        vm.finalise()
+        assertEquals(listOf(Triple(Outcome.A_WINS, 1, 0)), gameRepository.finalised)
+    }
+
+    @Test
+    fun aFailedScoreWrite_showsTheStoredScoreNotTheTypedOne() = runTest(mainDispatcher) {
+        val vm = recording()
+        vm.changeGoals(bib, +1)
+        vm.toggleAdjustScore() // stored override 1–0
+        gameRepository.failNextRecordWrites = 1
+        vm.setTypedScore(Team.B, "3")
+        assertEquals("0", vm.now.recording!!.typedB)
+        assertEquals(MatchResult(1, 0, Outcome.A_WINS), vm.now.recording!!.result)
+
+        // Switching adjust off fails too: the screen stays adjusted, as storage is.
+        gameRepository.failNextRecordWrites = 1
+        vm.toggleAdjustScore()
+        assertTrue(vm.now.recording!!.adjusted)
+        assertEquals(Score(1, 0), gameRepository.pendingNow!!.scoreOverride)
+    }
+
+    @Test
+    fun backDiscardThenGenerate_beforeTheDiscardFinishes_staysOnGenerate() = runTest(mainDispatcher) {
+        val vm = recording()
+        vm.back()
+        assertNull("Back leaves the record step behind", vm.now.recording)
+        val gate = CompletableDeferred<Unit>()
+        gameRepository.writeGate = gate
+        vm.discardUnfinished()
+        vm.confirmDiscardUnfinished()
+        players.take(4).forEach { vm.toggleSelected(it.id) }
+        vm.generate()
+        advanceUntilIdle()
+        assertEquals(Step.GENERATE, vm.now.step)
+
+        gate.complete(Unit)
+
+        assertEquals("The discard doesn't pull the organiser off Generate", Step.GENERATE, vm.now.step)
+        assertNull(gameRepository.pendingNow)
+        assertNull(vm.now.pendingGame)
+        assertNull(vm.now.pendingGameDate)
+    }
+
+    @Test
+    fun resume_isIgnoredWhileTheDiscardQuestionIsOpen() {
+        seedPending()
+        val vm = newViewModel()
+        vm.discardUnfinished()
+        vm.resumeUnfinished()
+        assertEquals(Step.ROSTER, vm.now.step)
+        assertNull(vm.now.recording)
+    }
+
+    @Test
+    fun finalise_whileAdjusted_refusesIfAStoredGoalDiffersEvenThoughTheResultMatches() = runTest(mainDispatcher) {
+        val vm = recording()
+        vm.changeGoals(bib, +1)
+        vm.toggleAdjustScore() // the score is now typed: 1–0
+        gameRepository.failNextRecordWrites = 1
+        val gate = CompletableDeferred<Unit>()
+        gameRepository.writeGate = gate
+        vm.changeGoals(otherBib, +1) // will fail; the typed 1–0 is unchanged
+        vm.finalise()
+
+        gate.complete(Unit)
+
+        assertTrue("The stored goals aren't what was on screen", gameRepository.finalised.isEmpty())
+        assertEquals(R.string.notice_record_save_failed, vm.now.notice)
+        assertNull(vm.now.recording!!.goals[otherBib]?.takeIf { it > 0 })
+
+        gameRepository.writeGate = null
+        vm.finalise()
+        assertEquals(listOf(Triple(Outcome.A_WINS, 1, 0)), gameRepository.finalised)
+    }
+
+    @Test
+    fun today_comesFromTheClock() = runTest(mainDispatcher) {
+        val vm = generated(4)
+        vm.continueToConfirm()
+        assertEquals(today, vm.now.today)
     }
 }

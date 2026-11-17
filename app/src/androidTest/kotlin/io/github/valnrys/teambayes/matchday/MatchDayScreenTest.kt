@@ -34,7 +34,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Match day on a real phone, driven the way a person would: by visible text and by the
+ * Match day on a device or emulator, driven the way a person would: by visible text and by the
  * names TalkBack reads out.
  *
  * Each test gets the app's real repositories on a fresh in-memory database, holding the
@@ -87,7 +87,10 @@ class MatchDayScreenTest {
         composeRule.onNodeWithText("4 selected").assertExists()
     }
 
-    /** Taps a pinned button, such as "Continue →". It's always on screen, so no scrolling. */
+    /**
+     * Taps a pinned button, such as "Continue →". Pinned buttons are on screen whenever the
+     * keyboard is closed (they step aside while it's open), so no scrolling.
+     */
     private fun tap(text: String) {
         composeRule.onNodeWithText(text).performClick()
     }
@@ -166,8 +169,8 @@ class MatchDayScreenTest {
         composeRule.onNodeWithText("MANUAL").assertExists()
 
         tap("Confirm ✓")
-        waitForText("Game saved. Recording results arrives next.")
-        composeRule.onNodeWithText("Who's playing?").assertExists()
+        // Saved, and straight on to recording the result.
+        waitForText("Record result")
 
         val saved = checkNotNull(pendingGame())
         assertEquals(Selection.MANUAL, saved.selection)
@@ -188,7 +191,7 @@ class MatchDayScreenTest {
 
         tap("Continue →")
         tap("Teams uneven (3 v 1) — sure?")
-        waitForText("Game saved. Recording results arrives next.")
+        waitForText("Record result")
     }
 
     @Test
@@ -209,12 +212,46 @@ class MatchDayScreenTest {
         composeRule.waitUntil(5_000) {
             runBlocking { container.playerRepository.players.first() }.any { it.name == "Aurelio" }
         }
-        composeRule.onNodeWithText("Where do they fit?").assertDoesNotExist()
+        // The sheet closes with an animation, and the tick lands with the next state: wait.
+        composeRule.waitUntil(5_000) { composeRule.onAllNodesWithText("Where do they fit?").fetchSemanticsNodes().isEmpty() }
 
         // Saved, ticked and on the roster in name order (the first, from A to Z).
         Espresso.closeSoftKeyboard()
         composeRule.onNodeWithTag(ROSTER_LIST_TAG).performScrollToNode(hasText("Aurelio"))
+        waitForText("1 selected")
         composeRule.onNode(hasText("Aurelio") and isToggleable()).assertIsOn()
-        composeRule.onNodeWithText("1 selected").assertExists()
+    }
+
+    @Test
+    fun wholeMatchDay_generateConfirmRecordAGoalFinaliseAndSeeTheMovement() {
+        showScreen()
+        tickFour()
+        tap("Generate teams (4) →")
+        waitForText("Option 1")
+        tap("Continue →")
+        tap("Confirm ✓")
+
+        waitForText("Record result")
+        composeRule.onNodeWithText("Tally the goals, or turn on Adjust score for a 0–0.").assertExists()
+        composeRule.onNodeWithText("Finalise result ✓").assertIsNotEnabled()
+        composeRule.onAllNodes(hasContentDescription("Add a goal for ", substring = true))
+            .onFirst()
+            .performScrollTo()
+            .performClick()
+        // One goal: one team is winning, and TalkBack hears it as one sentence.
+        composeRule.onNode(hasContentDescription("winning, ", substring = true)).assertExists()
+        tap("Finalise result ✓")
+
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodes(hasText("Bibs won") or hasText("Non-bibs won")).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onAllNodes(hasText("1 – 0") or hasText("0 – 1")).onFirst().assertExists()
+        composeRule.onNodeWithText("Rating movement", ignoreCase = true).assertExists()
+        composeRule.onAllNodes(hasContentDescription("Skill up", substring = true)).onFirst().assertExists()
+        composeRule.onAllNodes(hasContentDescription("Skill down", substring = true)).onFirst().assertExists()
+
+        tap("Start another match day")
+        waitForText("Who's playing?")
+        composeRule.onNodeWithText("0 selected").assertExists()
     }
 }

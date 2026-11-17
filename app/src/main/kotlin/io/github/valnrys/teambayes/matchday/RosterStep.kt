@@ -1,6 +1,7 @@
 package io.github.valnrys.teambayes.matchday
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,14 +21,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.tooling.preview.Preview
@@ -35,6 +37,9 @@ import androidx.compose.ui.unit.dp
 import io.github.valnrys.teambayes.R
 import io.github.valnrys.teambayes.ui.theme.TeamBayesShapes
 import io.github.valnrys.teambayes.ui.theme.TeamBayesTheme
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 
 /** Roster rows are a little taller than the 48 dp minimum, as in the original web version's checklist. */
 private val RosterRowHeight = 52.dp
@@ -65,6 +70,9 @@ internal fun RosterStep(state: MatchDayUiState, actions: MatchDayActions, conten
                     .testTag(ROSTER_LIST_TAG),
                 contentPadding = PaddingValues(bottom = 12.dp),
             ) {
+                if (state.showPendingCard) {
+                    item(key = "pending") { PendingGameCard(state.pendingGameDate, actions) }
+                }
                 item(key = "header") { RosterHeader(selectedCount = state.selectedIds.size) }
                 item(key = "search") {
                     OutlinedTextField(
@@ -122,6 +130,42 @@ internal fun RosterStep(state: MatchDayUiState, actions: MatchDayActions, conten
             }
         },
     )
+}
+
+/**
+ * "Unfinished match day": a game saved earlier is still waiting for its result. Shown at
+ * the top of the roster, as in the original web version, with **Discard** (which asks
+ * first) and **Resume →**.
+ *
+ * @param playedOn the pending game's day, or `null` while it loads.
+ */
+@Composable
+private fun PendingGameCard(playedOn: LocalDate?, actions: MatchDayActions) {
+    val day = playedOn?.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)).orEmpty()
+    Surface(
+        shape = TeamBayesShapes.card,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 16.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = stringResource(R.string.unfinished_heading),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.semantics { heading() },
+            )
+            Text(
+                text = stringResource(R.string.unfinished_body, day),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            ButtonRow {
+                GhostButton(stringResource(R.string.discard), onClick = actions::discardUnfinished, modifier = Modifier.weight(1f))
+                PrimaryButton(stringResource(R.string.resume), onClick = actions::resumeUnfinished, modifier = Modifier.weight(1f))
+            }
+        }
+    }
 }
 
 /** "Who's playing?" with the "{n} selected" pill beside it. */
