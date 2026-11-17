@@ -3,15 +3,21 @@ package io.github.valnrys.teambayes.matchday
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.valnrys.teambayes.ui.theme.TeamBayesTheme
 import org.junit.Rule
@@ -47,14 +53,22 @@ class MatchDayScreenTest {
         }
     }
 
+    /**
+     * Ticks four players. The roster list is lazy, so rows below the fold don't exist
+     * until scrolled to: scroll the list itself to each row, then tap it.
+     */
     private fun tickFour() {
-        four.forEach { composeRule.onNodeWithText(it).performScrollTo().performClick() }
-        composeRule.onNodeWithText(four.first()).assertIsOn()
+        four.forEach { name ->
+            composeRule.onNodeWithTag(ROSTER_LIST_TAG).performScrollToNode(hasText(name))
+            // Check straight away, while the row is certainly still on screen.
+            composeRule.onNodeWithText(name).performClick().assertIsOn()
+        }
         composeRule.onNodeWithText("4 selected").assertExists()
     }
 
+    /** Taps a pinned button, such as "Continue →". It's always on screen, so no scrolling. */
     private fun tap(text: String) {
-        composeRule.onNodeWithText(text).performScrollTo().performClick()
+        composeRule.onNodeWithText(text).performClick()
     }
 
     private fun tapChip(description: String) {
@@ -79,6 +93,18 @@ class MatchDayScreenTest {
     }
 
     @Test
+    fun search_showsOnlyTheMatchingPlayer() {
+        showScreen()
+        val wanted = players.last().name
+        val other = players.first().name
+
+        composeRule.onNode(hasSetTextAction() and hasText("Search players…")).performTextInput(wanted.take(4))
+
+        composeRule.onNodeWithText(wanted).assertIsDisplayed()
+        composeRule.onNodeWithText(other).assertDoesNotExist()
+    }
+
+    @Test
     fun tickGenerateMoveOneChip_showsEdited() {
         generateAndMoveOneChip()
         composeRule.onNodeWithText("Model:", substring = true).assertExists()
@@ -88,13 +114,13 @@ class MatchDayScreenTest {
     fun choosingAnotherOptionWhileEdited_asksFirst() {
         generateAndMoveOneChip()
 
-        tap("Option 2")
+        composeRule.onNodeWithText("Option 2").performScrollTo().performClick()
         composeRule.onNodeWithText("Discard your edits?").assertExists()
         composeRule.onNodeWithText("Cancel").performClick()
         composeRule.onNodeWithText("Discard your edits?").assertDoesNotExist()
         composeRule.onNodeWithText("EDITED").assertExists()
 
-        tap("Option 2")
+        composeRule.onNodeWithText("Option 2").performScrollTo().performClick()
         composeRule.onNodeWithText("Discard").performClick()
         composeRule.onNodeWithText("EDITED").assertDoesNotExist()
     }

@@ -7,6 +7,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -26,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -33,6 +41,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -274,20 +283,28 @@ private fun LockToggle(name: String, place: String, locked: Boolean, enabled: Bo
  * Divergence from the original web version: quality is a percentage here, matching the
  * cards, rather than a decimal such as "0.83" beside cards showing "83%".
  *
- * Draws nothing while [meter] is `null` (one side still empty).
+ * While [meter] is `null` (nothing edited yet, or a side still empty) it draws an empty
+ * line of the same height. The line is always there, so the pinned footer doesn't jump
+ * when the first move brings the numbers in, and TalkBack hears the change from one live
+ * region rather than a node appearing.
  */
 @Composable
 internal fun MeterLine(meter: Meter?) {
-    if (meter == null) return
-    val bibsFavoured = meter.winProbabilityA >= 0.5
-    val winA = percent(meter.winProbabilityA)
-    val sidePercent = if (bibsFavoured) winA else 100 - winA
-    val side = stringResource(if (bibsFavoured) R.string.bibs else R.string.non_bibs)
+    val style = TeamBayesTypography.numbers.copy(fontSize = MaterialTheme.typography.bodyMedium.fontSize)
+    val liveRegion = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+    // One Text node whether or not there's a meter, so it stays the same live region.
+    val text = if (meter == null) "" else {
+        val bibsFavoured = meter.winProbabilityA >= 0.5
+        val winA = percent(meter.winProbabilityA)
+        val sidePercent = if (bibsFavoured) winA else 100 - winA
+        val side = stringResource(if (bibsFavoured) R.string.bibs else R.string.non_bibs)
+        stringResource(R.string.meter_line, sidePercent, side, percent(meter.quality))
+    }
     Text(
-        text = stringResource(R.string.meter_line, sidePercent, side, percent(meter.quality)),
-        style = TeamBayesTypography.numbers.copy(fontSize = MaterialTheme.typography.bodyMedium.fontSize),
+        text = text,
+        style = style,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        modifier = liveRegion,
     )
 }
 
@@ -353,5 +370,60 @@ internal fun BackContinueRow(canContinue: Boolean, onBack: () -> Unit, onContinu
             enabled = canContinue,
             modifier = Modifier.weight(1f),
         )
+    }
+}
+
+/**
+ * The frame every match-day step sits in: a [body] that takes all the spare height, and
+ * a [footer] pinned to the bottom, so the main buttons stay on screen (except while the keyboard is open).
+ *
+ * The body scrolls on its own: each step gives it one scrolling list or column holding
+ * everything except the footer, so even in landscape or at a large font size every part
+ * of the step can be scrolled to. `clipToBounds` stops scrolled content drawing over
+ * the footer.
+ *
+ * **While the keyboard is open the footer hides**, so typing never squeezes the body
+ * into a sliver. [contentPadding] comes from the Scaffold's `WindowInsets.safeDrawing`,
+ * which includes the keyboard, so the body then ends just above it. The buttons come
+ * back when the keyboard closes.
+ *
+ * Body and footer are each a traversal group, so TalkBack reads the whole body before
+ * moving to the footer, whatever their positions on screen.
+ *
+ * @param contentPadding the Scaffold's inner padding: system bars, cutout and keyboard.
+ * @param body the step's scrolling content. It gets a fixed height, so a `LazyColumn`
+ *   or `verticalScroll` inside it works.
+ * @param footer the pinned controls, stacked with a little space between.
+ */
+@OptIn(ExperimentalLayoutApi::class) // isImeVisible
+@Composable
+internal fun StepLayout(
+    contentPadding: PaddingValues,
+    body: @Composable () -> Unit,
+    footer: @Composable ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(contentPadding)
+            .padding(horizontal = 16.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .clipToBounds()
+                .semantics { isTraversalGroup = true },
+        ) { body() }
+        if (!WindowInsets.isImeVisible) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Column(
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 12.dp)
+                    .semantics { isTraversalGroup = true },
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                content = footer,
+            )
+        }
     }
 }

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -40,15 +41,38 @@ import io.github.valnrys.teambayes.ui.theme.teamBayesColors
  * Tap a card to choose it. On the chosen card each player chip is a button that moves
  * them to the other team, which turns the card into an EDITED working copy with live
  * numbers. Every card's chips also have a lock, used by "↻ Re-generate".
+ *
+ * The cards scroll; the meter line, "↻ Re-generate", Back and Continue are pinned below
+ * them, so you can watch the numbers change and move on without scrolling to the end.
  */
 @Composable
 internal fun PickSplitStep(state: MatchDayUiState, actions: MatchDayActions, contentPadding: PaddingValues) {
     val editing = state.workingCopy?.mode == Selection.EDITED
+    StepLayout(
+        contentPadding = contentPadding,
+        body = { PickSplitBody(state, actions, editing) },
+        footer = {
+            // Always present, blank until the first move, so the footer never jumps.
+            MeterLine(if (editing) state.liveMeter else null)
+            GhostButton(
+                text = stringResource(if (state.generating) R.string.regenerating else R.string.regenerate),
+                onClick = actions::regenerate,
+                enabled = !state.generating,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            BackContinueRow(state.canContinue, onBack = actions::back, onContinue = actions::continueToConfirm)
+        },
+    )
+}
+
+/** The scrolling part of "Pick a split": the title, notes and the three cards. */
+@Composable
+private fun PickSplitBody(state: MatchDayUiState, actions: MatchDayActions, editing: Boolean) {
     Column(
         modifier = Modifier
+            .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(contentPadding)
-            .padding(horizontal = 16.dp, vertical = 16.dp),
+            .padding(vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         StepHeading(stringResource(R.string.pick_a_split))
@@ -80,16 +104,6 @@ internal fun PickSplitStep(state: MatchDayUiState, actions: MatchDayActions, con
                 )
             }
         }
-
-        if (editing) MeterLine(state.liveMeter)
-
-        GhostButton(
-            text = stringResource(if (state.generating) R.string.regenerating else R.string.regenerate),
-            onClick = actions::regenerate,
-            enabled = !state.generating,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        BackContinueRow(state.canContinue, onBack = actions::back, onContinue = actions::continueToConfirm)
     }
 }
 

@@ -3,8 +3,7 @@ package io.github.valnrys.teambayes.matchday
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -27,6 +26,8 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.tooling.preview.Preview
@@ -38,49 +39,69 @@ import io.github.valnrys.teambayes.ui.theme.TeamBayesTheme
 /** Roster rows are a little taller than the 48 dp minimum, as in the original web version's checklist. */
 private val RosterRowHeight = 52.dp
 
+/** Lets tests find the roster's scrolling list, to scroll a player into view. */
+internal const val ROSTER_LIST_TAG = "roster-list"
+
 /**
  * Step 1, "Who's playing?": tick players, search, add someone new, then generate teams
  * or make them by hand.
  *
- * A [LazyColumn] only builds the rows on screen, so a long roster stays smooth. The
- * header, fields and buttons are single `item`s in the same list, so the whole step
- * scrolls as one page.
+ * The title, search, player rows and "+ New player" (under the list, as in the original
+ * web version) all scroll together in one [LazyColumn], which only builds the rows on
+ * screen, so a long roster stays smooth. Scrolling it all as one means a short screen,
+ * such as landscape at a large font size, can still reach every part. The two action
+ * buttons are pinned below it, so they're always in reach, except while the keyboard
+ * is open (see [StepLayout]).
  */
 @Composable
 internal fun RosterStep(state: MatchDayUiState, actions: MatchDayActions, contentPadding: PaddingValues) {
-    LazyColumn(
+    StepLayout(
         contentPadding = contentPadding,
-        modifier = Modifier.padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        item { RosterHeader(selectedCount = state.selectedIds.size) }
-        item {
-            OutlinedTextField(
-                value = state.search,
-                onValueChange = actions::setSearch,
-                // A real label, not a placeholder: it stays visible (floating above the
-                // text) once you start typing, and TalkBack reads it as the field's name.
-                label = { Text(stringResource(R.string.search_players)) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        // `key` lets Compose track each row by player, not by position, so a tick stays
-        // on the right person while the search narrows the list.
-        items(state.visiblePlayers, key = { it.id }) { player ->
-            PlayerRow(
-                name = player.name,
-                checked = player.id in state.selectedIds,
-                onToggle = { actions.toggleSelected(player.id) },
-            )
-        }
-        if (state.visiblePlayers.isEmpty()) {
-            item { HintText(stringResource(R.string.no_players_match)) }
-        }
-        item { NewPlayerField(state, actions) }
-        item { ProblemText(state.problem) }
-        item {
+        body = {
+            val keyboard = LocalSoftwareKeyboardController.current
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag(ROSTER_LIST_TAG),
+                contentPadding = PaddingValues(bottom = 12.dp),
+            ) {
+                item(key = "header") { RosterHeader(selectedCount = state.selectedIds.size) }
+                item(key = "search") {
+                    OutlinedTextField(
+                        value = state.search,
+                        onValueChange = actions::setSearch,
+                        // A real label, not a placeholder: it stays visible (floating above the
+                        // text) once you start typing, and TalkBack reads it as the field's name.
+                        label = { Text(stringResource(R.string.search_players)) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        // The list filters as you type, so the Search key only has to close
+                        // the keyboard and bring the buttons back.
+                        keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                    )
+                }
+                // `key` lets Compose track each row by player, not by position, so a
+                // tick stays on the right person while the search narrows the list.
+                items(state.visiblePlayers, key = { it.id }) { player ->
+                    PlayerRow(
+                        name = player.name,
+                        checked = player.id in state.selectedIds,
+                        onToggle = { actions.toggleSelected(player.id) },
+                    )
+                }
+                if (state.visiblePlayers.isEmpty()) {
+                    item(key = "empty") { HintText(stringResource(R.string.no_players_match)) }
+                }
+                // Stable keys keep each field the same item as the rows around it change, so
+                // it keeps focus (and the keyboard stays open) after an Add or a keystroke.
+                item(key = "new-player") { NewPlayerField(state, actions) }
+            }
+        },
+        footer = {
+            ProblemText(state.problem)
             ButtonRow {
                 GhostButton(
                     text = stringResource(R.string.make_teams_manually),
@@ -99,13 +120,11 @@ internal fun RosterStep(state: MatchDayUiState, actions: MatchDayActions, conten
                     modifier = Modifier.weight(1f),
                 )
             }
-        }
-        // Room below the buttons, so they don't sit hard against the navigation bar.
-        item { Spacer(Modifier.height(16.dp)) }
-    }
+        },
+    )
 }
 
-/** "WHO'S PLAYING?" with the "{n} selected" pill beside it. */
+/** "Who's playing?" with the "{n} selected" pill beside it. */
 @Composable
 private fun RosterHeader(selectedCount: Int) {
     Row(
@@ -163,7 +182,9 @@ private fun PlayerRow(name: String, checked: Boolean, onToggle: () -> Unit) {
 private fun NewPlayerField(state: MatchDayUiState, actions: MatchDayActions) {
     val duplicate = state.duplicateName
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.Top,
     ) {

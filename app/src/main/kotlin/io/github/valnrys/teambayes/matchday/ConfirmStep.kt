@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -27,16 +28,43 @@ import io.github.valnrys.teambayes.ui.theme.teamBayesColors
  *
  * Divergence from the original web version: there's no date field yet. Nothing is saved until the
  * next milestone, so a date would be thrown away; it arrives with storage.
+ *
+ * The teams scroll if they're long; Back and Confirm are pinned below them.
  */
 @Composable
 internal fun ConfirmStep(state: MatchDayUiState, actions: MatchDayActions, contentPadding: PaddingValues) {
     val chosen = state.chosen ?: return
     val warning = sizeWarning(chosen.teamA.size, chosen.teamB.size)
+    StepLayout(
+        contentPadding = contentPadding,
+        body = { ConfirmSummary(state, chosen) },
+        footer = {
+            ButtonRow {
+                GhostButton(stringResource(R.string.back), onClick = actions::back, modifier = Modifier.weight(1f))
+                if (warning == null) {
+                    PrimaryButton(stringResource(R.string.confirm), onClick = actions::confirm, modifier = Modifier.weight(1f))
+                } else {
+                    PrimaryButton(
+                        text = stringResource(R.string.teams_uneven, warning.bigger, warning.smaller),
+                        onClick = actions::confirm,
+                        containerColor = MaterialTheme.teamBayesColors.amber,
+                        contentColor = MaterialTheme.colorScheme.onTertiary,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        },
+    )
+}
+
+/** The scrolling part of "Confirm teams": the title, the badge and both teams. */
+@Composable
+private fun ConfirmSummary(state: MatchDayUiState, chosen: ChosenTeams) {
     Column(
         modifier = Modifier
+            .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(contentPadding)
-            .padding(16.dp),
+            .padding(vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Row(
@@ -54,21 +82,6 @@ internal fun ConfirmStep(state: MatchDayUiState, actions: MatchDayActions, conte
                 TeamColumn(header = sideName, playerIds = ids, modifier = Modifier.weight(1f)) { id ->
                     PlayerChip(name = state.namesById.getValue(id), place = sideName)
                 }
-            }
-        }
-
-        ButtonRow {
-            GhostButton(stringResource(R.string.back), onClick = actions::back, modifier = Modifier.weight(1f))
-            if (warning == null) {
-                PrimaryButton(stringResource(R.string.confirm), onClick = actions::confirm, modifier = Modifier.weight(1f))
-            } else {
-                PrimaryButton(
-                    text = stringResource(R.string.teams_uneven, warning.bigger, warning.smaller),
-                    onClick = actions::confirm,
-                    containerColor = MaterialTheme.teamBayesColors.amber,
-                    contentColor = MaterialTheme.colorScheme.onTertiary,
-                    modifier = Modifier.weight(1f),
-                )
             }
         }
     }
